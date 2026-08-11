@@ -22,8 +22,14 @@ environment, the extension is silently skipped, and the library falls back to th
 slower pure-PyTorch kernels. Confirm the compiled extension is present with:
 
 ```bash
-python -c "from rl_engine import _C; print('compiled extension OK')"
+python -c "import torch; from rl_engine import _C; print('compiled extension OK')"
 ```
+
+The leading `import torch` is required: `_C` links against PyTorch's shared
+libraries (for example `libc10.so`), which are only on the loader path after
+`torch` has been imported. Without it the check fails with
+`ImportError: libc10.so: cannot open shared object file` even when the
+extension compiled successfully.
 
 A CPU-only install (plain `pip install -e .` on a machine with no GPU) remains
 supported and runs on the pure-PyTorch backends.
