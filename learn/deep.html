@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>深度 RL · RL Handbook</title>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+<div class="wrap">
+  <nav id="nav"></nav>
+  <main>
+    <h1>深度 RL</h1>
+    <p class="lead">状态不再能做成表格。用神经网络估 Q 或 π。你真正要吃透的是 DQN 和 PPO；其余大多是变体。</p>
+
+    <h2>DQN：把 Q-learning 接到神经网络</h2>
+    <p>朴素 Q-learning：<code>Q(s,a) ← Q + α (r + γ max Q(s',·) − Q)</code>。状态是图像时 Q 表爆炸，改成 <code>Q_θ(s,a)</code>。</p>
+    <p>两个让它能训起来的技巧：</p>
+    <ul>
+      <li><strong>Experience replay</strong>：把 <code>(s,a,r,s')</code> 丢进缓冲，随机抽。打破序列相关。</li>
+      <li><strong>Target network</strong>：max 那边用一套慢更新的 θ⁻，否则目标跟着自己跑。</li>
+    </ul>
+    <p>读一份实现就够：<a href="https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/dqn.py">cleanrl/dqn.py</a>（大约 200 行）。先在 <code>CartPole-v1</code> 跑绿。</p>
+
+    <h2>策略梯度</h2>
+    <p>目标：<code>J(θ) = E_{τ ~ π_θ}[G(τ)]</code>。对参数求导（REINFORCE）：</p>
+<pre>∇J ≈ Σ_t  ∇ log π_θ(a_t|s_t) · G_t</pre>
+    <p>直觉：某条轨迹回报高，就提高当时那些动作的概率；回报低就压低。</p>
+    <p><code>G_t</code> 方差极大。换成优势 <code>A_t</code>（减掉 baseline / value）是所有实用算法的第一步。A2C：一边学 π，一边学 V 当 baseline。</p>
+
+    <h2>PPO：现在的默认策略梯度</h2>
+    <p><a href="https://arxiv.org/abs/1707.06347">PPO</a>（2017）几乎是游戏 RL 和 LLM RLHF 的共同祖先。记住三件事：</p>
+    <ol>
+      <li><strong>Importance ratio</strong>：<code>r_t(θ) = π_θ(a|s) / π_old(a|s)</code>。用旧策略采的数据，校正到新策略。</li>
+      <li><strong>Clip</strong>：把 ratio 限制在 <code>[1−ε, 1+ε]</code>，防止一次更新把策略拧飞。</li>
+      <li><strong>On-policy 小步</strong>：采一批 → 更新几 epoch → 丢掉，重新采。</li>
+    </ol>
+<pre>L = min( r·A , clip(r, 1−ε, 1+ε)·A )</pre>
+    <p>正优势时 clip 防止 prob 涨太猛；负优势时防止 prob 跌太猛。</p>
+    <div class="card">
+      LLM 对齐里的 PPO 还要再加：value model、对 SFT 策略的 KL 惩罚、reward model。公式变长了，ratio 和 clip 没变。
+    </div>
+
+    <h2>连续动作（扫一眼即可）</h2>
+    <p>DDPG / TD3 / SAC 处理连续控制（机械臂、MuJoCo）。学 LLM 对齐可以先跳过，知道「还有 off-policy actor-critic」就行。以后做机器人再回来。</p>
+
+    <h2>怎么练手</h2>
+    <table>
+      <tr><th>顺序</th><th>做什么</th><th>仓库</th></tr>
+      <tr><td>1</td><td>CartPole + DQN，看 episode return 拉起来</td><td>CleanRL <code>dqn.py</code></td></tr>
+      <tr><td>2</td><td>CartPole + PPO，对照 clip 和 advantage</td><td>CleanRL <code>ppo.py</code></td></tr>
+      <tr><td>3</td><td>读 Spinning Up 的算法页，不要先读代码框架</td><td><a href="https://spinningup.openai.com/en/latest/">spinningup.openai.com</a></td></tr>
+      <tr><td>4</td><td>Atari 可选；显存和时间都贵，不是必修</td><td>CleanRL <code>ppo_atari.py</code></td></tr>
+    </table>
+    <p>Stable-Baselines3 适合「调包出结果」。要看懂算法，优先 CleanRL 的单文件，不要一上来就钻 SB3 的模块迷宫。</p>
+
+    <h2>常见坑</h2>
+    <ul>
+      <li>Reward 没归一化 / advantage 没标准化：梯度尺度乱跳。</li>
+      <li>把 off-policy 数据硬塞给 PPO：ratio 爆炸。</li>
+      <li>只看 loss 下降：PPO 的 clip loss 下降不代表策略变好，看 episode return。</li>
+      <li>γ、GAE λ、clip ε 乱改：先用论文默认，环境跑绿再调。</li>
+    </ul>
+    <div class="foot">下一页：<a href="llm.html">RLHF / DPO / GRPO</a></div>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

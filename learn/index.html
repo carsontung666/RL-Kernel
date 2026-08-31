@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>总览 · RL Handbook</title>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+<div class="wrap">
+  <nav id="nav"></nav>
+  <main>
+    <h1>RL Handbook</h1>
+    <p class="lead">给要从零学强化学习、又想接到 LLM 后训练和 RL-Kernel 的人。先把决策问题说清楚，再写深度 RL，最后才是 GRPO 和算子。</p>
+    <p class="muted">公开站：<a href="https://carsontung666.github.io/RL-Kernel/learn/">carsontung666.github.io/RL-Kernel</a>（挂在 RL-Kernel fork 的 <code>gh-pages</code>）。资料整理 2026-08-31。</p>
+
+    <h2>建议阅读顺序</h2>
+    <ol>
+      <li><a href="foundations.html">RL 基础</a> — 智能体、MDP、回报、V/Q、Bellman</li>
+      <li><a href="deep.html">深度 RL</a> — DQN、策略梯度、Actor-Critic、PPO</li>
+      <li><a href="llm.html">RLHF / DPO / GRPO</a> — 语言模型怎么用 RL 对齐</li>
+      <li><a href="systems.html">系统与 RL-Kernel</a> — logprob 漂移、batch-invariant、算子层</li>
+      <li><a href="repos.html">仓库与课程</a> — GitHub 和课，按「为什么读」筛过</li>
+      <li><a href="papers.html">论文顺序</a> → <a href="week.html">四周计划</a></li>
+    </ol>
+
+    <h2>一张图记住四层</h2>
+    <table>
+      <tr><th></th><th>解决什么</th><th>你先碰什么</th></tr>
+      <tr>
+        <td>控制 / 表格 RL</td>
+        <td>在小状态空间里学策略</td>
+        <td>Sutton 书、蘑菇书前三章、FrozenLake</td>
+      </tr>
+      <tr>
+        <td><a href="deep.html">深度 RL</a></td>
+        <td>用神经网络近似 V/Q/π</td>
+        <td>CleanRL 的 DQN / PPO + CartPole</td>
+      </tr>
+      <tr>
+        <td><a href="llm.html">LLM 对齐</a></td>
+        <td>用人类偏好或可验证奖励改写模型</td>
+        <td>InstructGPT → DPO → DeepSeek GRPO</td>
+      </tr>
+      <tr>
+        <td><a href="systems.html">系统层</a></td>
+        <td>rollout 和训练的 logprob 必须对齐</td>
+        <td>本 fork 的 <code>RL-Kernel</code></td>
+      </tr>
+    </table>
+
+    <div class="card">
+      不要从 GRPO 论文倒着学。看不懂「importance ratio」和「advantage」，后面全是符号噪音。
+    </div>
+
+    <h2>三句定义</h2>
+    <ul>
+      <li><strong>强化学习</strong>：智能体在环境里试动作，用回报学策略。没有现成的「正确答案标签」。</li>
+      <li><strong>深度 RL</strong>：策略或价值函数是神经网络，状态可以是图像或 token 序列。</li>
+      <li><strong>LLM RL</strong>：环境是「提示 + 生成」，动作是 token，奖励来自人类、裁判模型或规则。</li>
+    </ul>
+
+    <h2>本机仓库</h2>
+<pre>/home/junyao/code/RL-Kernel     # 上游 clone（学习算子）
+/home/junyao/code/rl-handbook   # 你正在读的站点源码
+fork: github.com/carsontung666/RL-Kernel</pre>
+
+    <div class="foot">静态站 · GitHub Pages · 不碰 fork 的 main</div>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

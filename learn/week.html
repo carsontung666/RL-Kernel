@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>四周计划 · RL Handbook</title>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+<div class="wrap">
+  <nav id="nav"></nav>
+  <main>
+    <h1>四周计划</h1>
+    <p class="lead">每天 2–4 小时。四周后你应该能：手写 PPO clip 损失、讲清 GRPO 和 PPO 的差别、读懂 RL-Kernel 的 linear_logp 在算什么。</p>
+
+    <h2>第 1 周 · 词汇和表格 RL</h2>
+    <ol>
+      <li>本 handbook 的<a href="foundations.html">基础页</a>读两遍。</li>
+      <li>蘑菇书第 1–3 章，或 Sutton 第 1–4 章二选一，不要两份一起做。</li>
+      <li>跑 <a href="https://github.com/datawhalechina/easy-rl/blob/master/notebooks/Q-learning">Q-learning notebook</a> 或 FrozenLake。能解释 ε-greedy 和更新式。</li>
+      <li>笔记里必须出现：MDP 五元组、G、V、Q、A、on/off-policy。</li>
+    </ol>
+    <div class="card">验收：合上书，用一张纸画出智能体循环，并写出 Q-learning 更新。</div>
+
+    <h2>第 2 周 · 深度 RL，只碰两个文件</h2>
+    <ol>
+      <li>读 <a href="https://spinningup.openai.com/en/latest/spinningup/rl_intro.html">Spinning Up intro</a>。</li>
+      <li>Clone <a href="https://github.com/vwxyzjn/cleanrl">cleanrl</a>，先跑：</li>
+    </ol>
+<pre>uv run python cleanrl/dqn.py --env-id CartPole-v1 --total-timesteps 50000
+uv run python cleanrl/ppo.py --env-id CartPole-v1 --total-timesteps 50000</pre>
+    <ol start="3">
+      <li>对着 <code>ppo.py</code> 把 ratio、clip、advantage 三处标出来。</li>
+      <li>读 PPO 论文方法节（可以跳实验）。</li>
+    </ol>
+    <div class="card">验收：不看论文，写出 PPO 的 clip 目标；CartPole 两条曲线都拉上去。</div>
+
+    <h2>第 3 周 · LLM 对齐</h2>
+    <ol>
+      <li>读 InstructGPT、DPO、DeepSeekMath 三篇的方法节（<a href="papers.html">论文页</a>）。</li>
+      <li>用 TRL 跑通官方 DPO 或 GRPO 最小例子（小模型，CPU/单卡都行）。</li>
+      <li>在笔记里画：SFT → RM → PPO vs DPO vs GRPO，各需要哪些模型。</li>
+      <li>写下 <code>old_logprob</code> 和训练侧重算 logprob 分别由谁产生。</li>
+    </ol>
+    <div class="card">验收：能向别人讲清「为什么 GRPO 可以不要 value model」，以及 ratio 的分子分母从哪来。</div>
+
+    <h2>第 4 周 · 接到 RL-Kernel</h2>
+    <ol>
+      <li>读官方文档 <a href="https://rl-align.github.io/RL-Kernel/">rl-align.github.io/RL-Kernel</a> 的 linear_logp 和 fused logp。</li>
+      <li>在本地 clone 里跑 <code>examples/grpo_single_gpu.py</code>（有 GPU 再跑；没有就读代码和测试）。</li>
+      <li>读 issue <a href="https://github.com/RL-Align/RL-Kernel/issues/83">#83</a> 的 P0.3+ 一段，知道 WS1/WS2 在锁什么。</li>
+      <li>打开 <code>tests/test_batch_invariant_logp.py</code>，看「batch=1 vs N」怎么断言。</li>
+    </ol>
+    <div class="card">验收：能说出 fused linear logp 省掉的是哪块张量，以及 batch-invariant 要在哪些配置下保持不变。</div>
+
+    <h2>环境建议</h2>
+    <ul>
+      <li>第 1–2 周：任意笔记本 + CPU。</li>
+      <li>第 3 周：一块能跑 1B 级模型的 GPU 更舒服；没有就只读 TRL 源码。</li>
+      <li>第 4 周：和 RL-Kernel 文档一样，CUDA 源码构建需要匹配的 PyTorch wheel。</li>
+    </ul>
+
+    <h2>本机路径</h2>
+<pre>/home/junyao/code/RL-Kernel
+/home/junyao/code/rl-handbook
+/home/junyao/code/handbook          # 你的 vLLM 学习站
+fork: github.com/carsontung666/RL-Kernel</pre>
+    <div class="foot">下一页：<a href="do.html">别碰 / 能做</a></div>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>别碰 / 能做 · RL Handbook</title>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+<div class="wrap">
+  <nav id="nav"></nav>
+  <main>
+    <h1>别碰 / 能做</h1>
+    <p class="lead">学习阶段和给上游提 PR 是两件事。前三周不要给 RL-Kernel 开功能 PR。</p>
+
+    <h2 class="bad">学习阶段别做</h2>
+    <table>
+      <tr><th>冲动</th><th>为什么停</th></tr>
+      <tr><td>从零实现一套 PPO 框架</td><td>CleanRL 已经把细节摊开。重复造轮子学不到新东西。</td></tr>
+      <tr><td>同时读 5 份 awesome 清单</td><td>清单没有顺序。按本站论文页走。</td></tr>
+      <tr><td>一上来就改 CUDA kernel</td><td>你还没有 logprob 的数值合同。先读测试。</td></tr>
+      <tr><td>追每一篇 GRPO 变体</td><td>DAPO/GSPO/Dr.GRPO 是主干上的旋钮。主干没熟会迷路。</td></tr>
+      <tr><td>在 fork 的 <code>main</code> 上直接推 handbook</td><td>和 vLLM 站一样：handbook 只活在 <code>gh-pages</code>。</td></tr>
+      <tr><td>给 #83 里已有 assignee 的 issue 平行开 PR</td><td>先评论认领。WS2 logprob 五个 PR 已经在排。</td></tr>
+    </table>
+
+    <h2 class="ok">现在能做（学习）</h2>
+    <table>
+      <tr><th>优先级</th><th>活</th></tr>
+      <tr><td>本周</td><td>按 <a href="week.html">四周计划</a>第 1 周走完</td></tr>
+      <tr><td>第 2 周</td><td>CleanRL DQN + PPO，CartPole 跑绿</td></tr>
+      <tr><td>第 3 周</td><td>三篇对齐论文 + TRL 最小脚本</td></tr>
+      <tr><td>第 4 周</td><td>读 linear_logp 文档和 <code>examples/grpo_single_gpu.py</code></td></tr>
+    </table>
+
+    <h2 class="ok">四周后如果要给上游干活</h2>
+    <p>先看 <a href="https://github.com/RL-Align/RL-Kernel/blob/main/docs/contributing/README.md">contributing</a>，在 Discord/Slack 问一句。适合新人的切口通常是：</p>
+    <ul>
+      <li>文档、FAQ、复现命令、benchmark 表格里的 <code>pending</code></li>
+      <li>某个算子的测试缺口（batch=1 vs N、padding 侧）</li>
+      <li>标了 good first / docs 的 issue</li>
+    </ul>
+    <p>不适合第一 PR：WS2 cross-config、确定性 GEMM 性能、真 vLLM↔Megatron 对齐。那些是有经验的人在 <code>test</code> 分支上的串行瓶颈。</p>
+
+    <h2>Fork 怎么用</h2>
+    <ul>
+      <li>上游：<a href="https://github.com/RL-Align/RL-Kernel">RL-Align/RL-Kernel</a></li>
+      <li>你的 fork：<a href="https://github.com/carsontung666/RL-Kernel">carsontung666/RL-Kernel</a>（已经存在）</li>
+      <li>本站：fork 的 <code>gh-pages</code>，<strong>不改 main</strong></li>
+      <li>提 PR：从 fork 的功能分支打到上游 <code>main</code> 或他们指定的 <code>test</code></li>
+    </ul>
+    <div class="foot">回 <a href="index.html">总览</a></div>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

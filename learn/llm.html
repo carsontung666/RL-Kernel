@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>RLHF / DPO / GRPO · RL Handbook</title>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+<div class="wrap">
+  <nav id="nav"></nav>
+  <main>
+    <h1>LLM 对齐：RLHF、DPO、GRPO</h1>
+    <p class="lead">语言模型的 RL：状态是 prompt+已生成 token，动作是下一个 token，奖励往往很稀疏（整段回复才打一分）。</p>
+
+    <h2>为什么 SFT 不够</h2>
+    <p>SFT 模仿人类示范：<code>max log π(y|x)</code>。它不会说「这个答案比那个好多少」，也不会在没有示范的任务上自己探索。对齐需要一种能比较、能探索的目标，这就是 RL 或 RL 的近亲。</p>
+
+    <h2>经典三阶段（InstructGPT）</h2>
+    <ol>
+      <li><strong>SFT</strong>：示范数据。</li>
+      <li><strong>Reward model</strong>：人类在两个回复里选更好的那个，学 <code>r_φ(x,y)</code>。</li>
+      <li><strong>PPO</strong>：策略最大化 <code>r_φ</code>，同时 KL 惩罚别离 SFT 太远。</li>
+    </ol>
+<pre>reward = r_φ(x,y) − β KL(π || π_SFT)</pre>
+    <p>论文：<a href="https://arxiv.org/abs/2203.02155">InstructGPT / Ouyang et al. 2022</a>。要配一个 value model 估优势，工程重：四个模型（policy、SFT ref、RM、value）同时在场。</p>
+
+    <h2>DPO：跳过显式 RL</h2>
+    <p><a href="https://arxiv.org/abs/2305.18290">DPO</a> 把 RM + PPO 收成一个分类损失。输入仍是偏好对 <code>(y_w, y_l)</code>：</p>
+<pre>L = −log σ( β ( log π(y_w|x)/π_ref(y_w|x)
+              − log π(y_l|x)/π_ref(y_l|x) ) )</pre>
+    <p>优点：实现简单、稳定、只要 logprob。缺点：离线偏好，不会自己采样探索；分布外容易歪。</p>
+    <p>同类还有 IPO、KTO、SimPO。先把 DPO 公式抄熟，再看变体。</p>
+
+    <h2>GRPO：现在开源 LLM RL 的主流</h2>
+    <p>DeepSeekMath / DeepSeek-R1 用的 <strong>Group Relative Policy Optimization</strong>。核心变化：</p>
+    <ul>
+      <li>同一个 prompt 采 <code>G</code> 条回复（group）。</li>
+      <li>优势用组内相对分数，<strong>不要 value model</strong>。</li>
+      <li>目标仍是 PPO 风格的 clipped ratio + KL。</li>
+    </ul>
+<pre>A_i = (r_i − mean(r_group)) / std(r_group)
+ratio_i = exp( logπ_θ(y_i) − logπ_old(y_i) )</pre>
+    <p>数学、代码、竞赛这种「可验证奖励」（对就 1，错就 0）特别适合 GRPO：组内天然有相对高低。</p>
+    <div class="card">
+      GRPO 的内存炸弹来自 <code>G × 序列 × 词表</code> 的 logits / logprob。RL-Kernel 的 fused logp、prefix-shared attention 就是冲这个来的。
+    </div>
+
+    <h2>和 PPO 的对照</h2>
+    <table>
+      <tr><th></th><th>PPO-RLHF</th><th>DPO</th><th>GRPO</th></tr>
+      <tr><td>需要 RM</td><td>要</td><td>不要（偏好对直接进损失）</td><td>可用规则/裁判，不必单独 RM</td></tr>
+      <tr><td>Value model</td><td>要</td><td>不要</td><td>不要</td></tr>
+      <tr><td>在线采样</td><td>要</td><td>不要</td><td>要（每组 G 条）</td></tr>
+      <tr><td>关键张量</td><td>logπ、V、r</td><td>logπ(y_w)、logπ(y_l)</td><td>组内 logπ、old logπ、r</td></tr>
+    </table>
+
+    <h2>必须分清的两个 logprob</h2>
+    <table>
+      <tr><th>名字</th><th>谁算</th><th>干什么</th></tr>
+      <tr><td><code>old_logprob</code></td><td>rollout 引擎（vLLM / sglang）</td><td>importance ratio 的分母</td></tr>
+      <tr><td>训练侧重算 logprob</td><td>Megatron / FSDP / DeepSpeed</td><td>ratio 的分子、梯度入口</td></tr>
+    </table>
+    <p>同一条 token 序列、同一份权重，两边应对齐。对不齐就会出现假 KL、假 advantage，策略在优化噪声。下一页专门讲这个。</p>
+
+    <h2>开源框架（编排层，不是算子层）</h2>
+    <ul>
+      <li><a href="https://github.com/huggingface/trl">huggingface/trl</a> — 入门 PPO/DPO/GRPO，API 友好</li>
+      <li><a href="https://github.com/OpenRLHF/OpenRLHF">OpenRLHF/OpenRLHF</a> — 生产向 RLHF</li>
+      <li><a href="https://github.com/volcengine/verl">volcengine/verl</a> — 字节 veRL，hybrid engine</li>
+      <li><a href="https://github.com/THUDM/slime">THUDM/slime</a> — Megatron + vLLM 的训练栈</li>
+      <li><a href="https://github.com/vllm-project/vime">vllm-project/vime</a> — vLLM 生态的 RL 编排；RL-Kernel 往这里插算子</li>
+    </ul>
+    <p>这些框架管调度、数据、权重同步。RL-Kernel 不管这些，只替换 logprob / KL / packing 这些热路径。</p>
+    <div class="foot">下一页：<a href="systems.html">系统与 RL-Kernel</a></div>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

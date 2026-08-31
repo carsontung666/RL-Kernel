@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>系统与 RL-Kernel · RL Handbook</title>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+<div class="wrap">
+  <nav id="nav"></nav>
+  <main>
+    <h1>系统层：为什么需要 RL-Kernel</h1>
+    <p class="lead">算法对了，系统仍可能把 ratio 算脏。这一页解释 train–inference 数值不一致，以及算子库站在哪一层。</p>
+
+    <h2>一条 RL 步在干什么</h2>
+    <ol>
+      <li>Rollout：vLLM / sglang 按当前策略采样 token，顺带记下 <code>old_logprob</code>。</li>
+      <li>奖励：规则、裁判模型或 RM 给整段回复打分。</li>
+      <li>训练：Megatron / FSDP 对同一条序列重算 logprob，做 GRPO/PPO 损失，反传。</li>
+      <li>同步：新权重拷回 rollout 引擎。</li>
+    </ol>
+    <p>verl、slime、vime 做 1–4 的调度。RL-Kernel 只替换其中最贵、最容易漂的算子：selected-logprob、线性层融合、packing、确定性 GEMM / attention。</p>
+
+    <h2>Selected logprob</h2>
+    <p>训练几乎从不对整个词表做 CE。它只要「实际采样到的那个 token」的 log π：</p>
+<pre>logπ(y_t | y_&lt;t) = logit[y_t] − logsumexp(logits)</pre>
+    <p>朴素实现会物化 <code>[B, S, V]</code> logits。V≈15 万、G=64 时显存爆炸。Fused linear logp 从 hidden 和 LM head 权重直接流式算出 selected logp，不落地完整 logits。</p>
+
+    <h2>漂移从哪来</h2>
+    <table>
+      <tr><th>来源</th><th>现象</th></tr>
+      <tr><td>Batch size / packing</td><td>同一条序列单独算和塞进大 batch 算，logp 差 1e-3</td></tr>
+      <tr><td>Split-K GEMM、cuBLAS 选核</td><td>形状一变，归约顺序变</td></tr>
+      <tr><td>Attention split-KV / chunked prefill</td><td>softmax 累加顺序变，LSE 变</td></tr>
+      <tr><td>TP/CP 归约</td><td>多卡 all-reduce 顺序、downcast 时机不同</td></tr>
+      <tr><td>Tokenizer / padding 左右</td><td>根本不是同一条序列，后面全白比</td></tr>
+    </table>
+    <p>算法同学看到 KL 慢慢爬，容易怪奖励或超参。先查 <code>dlogp = train_logp − old_logp</code> 在更新权重<strong>之前</strong>是不是已经非零。</p>
+    <div class="card">
+      RL-Kernel 的定位：算子级 train–inference 一致性，不是「第一个 batch-invariant kernel」（那些已经有 Thinking Machines / sglang / DeepSeek）。也不是框架级对齐（那是 vime / verl）。
+    </div>
+
+    <h2>Batch-invariant 是什么意思</h2>
+    <p>固定模型、固定序列、固定权重：输出不随 batch=1/N、padding、chunked-prefill 开/关而变。Bitwise 最好，否则走公开的容差合同。</p>
+    <p>单卡链：RMSNorm → GEMM → Attention → LM head → logprob。多卡再锁 TP/CP 归约顺序。真 vLLM == 真 Megatron 是再下一阶段。</p>
+
+    <h2>你该读的本仓入口</h2>
+    <table>
+      <tr><th>文件 / 文档</th><th>看什么</th></tr>
+      <tr><td><a href="https://github.com/RL-Align/RL-Kernel">RL-Align/RL-Kernel</a> README</td><td>哲学和 benchmark 数字</td></tr>
+      <tr><td>官方文档 <a href="https://rl-align.github.io/RL-Kernel/">rl-align.github.io/RL-Kernel</a></td><td>算子页、linear_logp</td></tr>
+      <tr><td><code>docs/operators/linear-logp.md</code></td><td>fused CE 不物化 logits</td></tr>
+      <tr><td><code>docs/operators/batch-invariant-logp.md</code></td><td>锁定归约顺序</td></tr>
+      <tr><td><code>examples/grpo_single_gpu.py</code></td><td>最小可跑 GRPO</td></tr>
+      <tr><td>Issue <a href="https://github.com/RL-Align/RL-Kernel/issues/83">#83</a></td><td>2026 下半年路线图</td></tr>
+    </table>
+
+    <h2>和 vLLM handbook 的关系</h2>
+    <p>vLLM 站在 inference serving。RL-Kernel 站在 post-training 热路径。两者在 rollout 相遇：vLLM 负责快采样，RL-Kernel 负责采样出的 logprob 能被训练侧复现。</p>
+    <p>你已经有一份 vLLM 学习站：<a href="https://carsontung666.github.io/vllm/">carsontung666.github.io/vllm</a>。先会跑 serve，再看这一页。</p>
+    <div class="foot">下一页：<a href="repos.html">仓库与课程</a></div>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>
