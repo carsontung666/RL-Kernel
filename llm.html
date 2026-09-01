@@ -23,43 +23,64 @@
       <tr><td>奖励</td><td>多数位置是 0；结束时给一个序列分数，或逐步给格式/正确性</td></tr>
     </table>
     <p>序列对数概率是逐步加起来的：</p>
-<pre>log π(y | x) = Σ_t log π(y_t | x, y_&lt;t)</pre>
+    <div class="eq">\[
+      \log\pi(y\mid x)=\sum_t \log\pi(y_t\mid x, y_{\lt t})
+    \]</div>
     <p>训练几乎总是 <strong>teacher-forcing</strong>：用已经采样好的 y，逐步算每个 token 的 logπ，不再重新采样。采样（temperature / top-p）只发生在 rollout；算 logprob 时不要再乘一遍温度。</p>
     <p>损失只落在 completion token 上。prompt、padding、图像占位、工具观察，都要 mask 掉。框架里这个张量叫 <code>completion_mask</code> / <code>loss_mask</code>。</p>
 
     <h2>为什么 SFT 不够</h2>
-    <p>SFT 最大化 <code>log π(y|x)</code>，y 来自人类示范。它不会说「这个答案比那个好多少」，也不会在没有示范的题上自己探索。要对齐「更好」，需要能比较、能探索的目标：RL 或 RL 的近亲。</p>
+    <p>SFT 最大化 \(\log\pi(y\mid x)\)，\(y\) 来自人类示范。它不会说「这个答案比那个好多少」，也不会在没有示范的题上自己探索。要对齐「更好」，需要能比较、能探索的目标：RL 或 RL 的近亲。</p>
 
     <h2>经典三阶段（InstructGPT / PPO-RLHF）</h2>
     <ol>
-      <li><strong>SFT</strong>：示范数据，得到 π_SFT。</li>
-      <li><strong>Reward model</strong>：人类在 (y_w, y_l) 里选更好的，学 <code>r_φ(x,y)</code>。损失是 Bradley-Terry：<code>−log σ(r_w − r_l)</code>。</li>
-      <li><strong>PPO</strong>：策略最大化 r_φ，同时 KL 惩罚别离 SFT 太远。</li>
+      <li><strong>SFT</strong>：示范数据，得到 \(\pi_{\mathrm{SFT}}\)。</li>
+      <li><strong>Reward model</strong>：人类在 \((y_w,y_l)\) 里选更好的，学 \(r_\phi(x,y)\)。损失是 Bradley-Terry：\(-\log\sigma(r_w-r_l)\)。</li>
+      <li><strong>PPO</strong>：策略最大化 \(r_\phi\)，同时 KL 惩罚别离 SFT 太远。</li>
     </ol>
-<pre>r_t = 0 for t &lt; T
-r_T = r_φ(x,y) − β KL_t          # KL 可以逐步加，也可以只加在序列级
-KL_t ≈ log π_θ(y_t|s_t) − log π_ref(y_t|s_t)</pre>
+    <div class="eq">\[
+      r_t=0\ (t \lt T),\qquad
+      r_T=r_\phi(x,y)-\beta\,\mathrm{KL}_t
+    \]</div>
+    <div class="eq">\[
+      \mathrm{KL}_t \approx \log\pi_\theta(y_t\mid s_t)-\log\pi_{\mathrm{ref}}(y_t\mid s_t)
+    \]</div>
     <p>现场要四个模型：policy、SFT/ref、RM、value。Value 用 GAE 把稀疏的序列奖励变成逐步优势。工程重，所以后来有 DPO 和 GRPO。</p>
     <p>KL 估计常用：</p>
     <table>
       <tr><th>名字</th><th>公式</th><th>用途</th></tr>
-      <tr><td>k1</td><td><code>logπ − logπ_ref</code></td><td>无偏但方差大，当逐步惩罚</td></tr>
-      <tr><td>k3</td><td><code>exp(logπ_ref − logπ) − (logπ_ref − logπ) − 1</code></td><td>非负，监控用更稳</td></tr>
+      <tr><td>k1</td><td>\(\log\pi-\log\pi_{\mathrm{ref}}\)</td><td>无偏但方差大，当逐步惩罚</td></tr>
+      <tr><td>k3</td><td>\(\mathrm{e}^{\log\pi_{\mathrm{ref}}-\log\pi}-(\log\pi_{\mathrm{ref}}-\log\pi)-1\)</td><td>非负，监控用更稳</td></tr>
     </table>
-    <p>β 太大：模型不敢离 SFT，学不动奖励。β 太小：reward hacking，RM 被钻空子，语言崩。</p>
+    <p>\(\beta\) 太大：模型不敢离 SFT，学不动奖励。\(\beta\) 太小：reward hacking，RM 被钻空子，语言崩。</p>
 
     <h2>DPO：跳过显式 RL</h2>
     <p>在「最优策略与 RM 一一对应」的假设下，RM + KL 约束 PPO 可以消掉 r_φ，变成对偏好对的分类损失：</p>
-<pre>L = −log σ( β ( log π(y_w|x)/π_ref(y_w|x)
-              − log π(y_l|x)/π_ref(y_l|x) ) )</pre>
+    <div class="eq">\[
+      L=-\log\sigma\Bigg(
+        \beta\Big(
+          \log\frac{\pi(y_w\mid x)}{\pi_{\mathrm{ref}}(y_w\mid x)}
+          -
+          \log\frac{\pi(y_l\mid x)}{\pi_{\mathrm{ref}}(y_l\mid x)}
+        \Big)
+      \Bigg)
+    \]</div>
     <p>只需要 policy 和冻结的 ref，只要能算两条回复的 logπ。优点：实现短、稳定。缺点：离线偏好，不会自己采样探索；分布外容易歪；长度偏差（更长的 y 往往 logπ 更低或 RM 更偏）要单独处理。</p>
     <p>IPO / KTO / SimPO 改的是「这个 sigmoid 差」的形状或要不要 ref。主干仍是：两条序列的 logπ 对比。</p>
 
     <h2>GRPO：组内相对优势</h2>
     <p>同一个 prompt 采 G 条回复，用组内分数当 baseline，<strong>不训 value model</strong>：</p>
-<pre>A_i = (r_i − mean({r_1..r_G})) / std({r_1..r_G})
-ratio_i = exp( logπ_θ(y_i) − logπ_old(y_i) )
-L = min( ratio·A , clip(ratio, 1−ε, 1+ε)·A ) − β KL</pre>
+    <div class="eq">\[
+      A_i=\frac{r_i-\mathrm{mean}(\{r_1,\ldots,r_G\})}{\mathrm{std}(\{r_1,\ldots,r_G\})}
+    \]</div>
+    <div class="eq">\[
+      \rho_i=\exp\bigl(\log\pi_\theta(y_i)-\log\pi_{\mathrm{old}}(y_i)\bigr)
+    \]</div>
+    <div class="eq">\[
+      L=\min\bigl(\rho_i A_i,\;
+        \mathrm{clip}(\rho_i,1-\varepsilon,1+\varepsilon)\,A_i\bigr)
+      -\beta\,\mathrm{KL}
+    \]</div>
     <p>A_i 通常广播到这条回复的每个 completion token 上（token-level 损失、序列级优势）。数学、代码、竞赛这种可验证奖励（对 1 错 0）特别合适：一组里天然有对有错。</p>
     <p>几个会改数值、但不改问题本身的旋钮：</p>
     <ul>
@@ -78,7 +99,7 @@ L = min( ratio·A , clip(ratio, 1−ε, 1+ε)·A ) − β KL</pre>
       <tr><td>Value</td><td>要（GAE）</td><td>不要</td><td>不要（组内 baseline）</td></tr>
       <tr><td>在线采样</td><td>要</td><td>不要</td><td>要（每组 G 条）</td></tr>
       <tr><td>clip ratio</td><td>要</td><td>无</td><td>要</td></tr>
-      <tr><td>关键量</td><td>logπ、V、r_φ、KL</td><td>logπ(y_w)、logπ(y_l)</td><td>组内 logπ、old logπ、r</td></tr>
+      <tr><td>关键量</td><td>\(\log\pi,\,V,\,r_\phi,\,\mathrm{KL}\)</td><td>\(\log\pi(y_w),\,\log\pi(y_l)\)</td><td>组内 \(\log\pi,\,\log\pi_{\mathrm{old}},\,r\)</td></tr>
     </table>
 
     <h2>一步 GRPO 在框架里怎么走</h2>

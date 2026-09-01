@@ -66,6 +66,17 @@ pre {
 ul { padding-left: 1.2em; }
 li { margin: 5px 0; }
 .foot { margin-top: 48px; color: var(--muted); font-size: 13px; }
+.katex, .katex-display { color: var(--text); }
+.eq {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px 16px;
+  overflow-x: auto;
+  margin: 14px 0 20px;
+  text-align: center;
+}
+.eq .katex-display { margin: 0.2em 0; }
 @media (max-width: 800px) {
   .wrap { grid-template-columns: 1fr; }
   nav { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }

@@ -16,26 +16,26 @@
     <h2>五个对象</h2>
     <table>
       <tr><th>名字</th><th>记法</th><th>一句话</th></tr>
-      <tr><td>状态</td><td><code>s</code></td><td>智能体此刻看到的世界摘要</td></tr>
-      <tr><td>动作</td><td><code>a</code></td><td>可以选的一步</td></tr>
-      <tr><td>奖励</td><td><code>r</code></td><td>环境立刻打的分，可正可负</td></tr>
-      <tr><td>策略</td><td><code>π(a|s)</code></td><td>在 s 下选 a 的分布</td></tr>
-      <tr><td>折扣</td><td><code>γ ∈ [0,1)</code></td><td>未来奖励打几折；γ=0 只看眼前</td></tr>
+      <tr><td>状态</td><td>\(s\)</td><td>智能体此刻看到的世界摘要</td></tr>
+      <tr><td>动作</td><td>\(a\)</td><td>可以选的一步</td></tr>
+      <tr><td>奖励</td><td>\(r\)</td><td>环境立刻打的分，可正可负</td></tr>
+      <tr><td>策略</td><td>\(\pi(a\mid s)\)</td><td>在 \(s\) 下选 \(a\) 的分布</td></tr>
+      <tr><td>折扣</td><td>\(\gamma \in [0,1)\)</td><td>未来奖励打几折；\(\gamma=0\) 只看眼前</td></tr>
     </table>
-    <p>交互循环：<code>s → a ~ π → r, s' → …</code>。一条轨迹是 <code>(s₀, a₀, r₁, s₁, a₁, …)</code>。</p>
+    <p>交互循环：\(s \to a \sim \pi \to r,\, s'\to \cdots\)。一条轨迹是 \((s_0, a_0, r_1, s_1, a_1, \ldots)\)。</p>
     <p>环境对外就是两步：<code>reset()</code> 给初始状态；<code>step(a)</code> 返回 <code>(s', r, done)</code>。CartPole、FrozenLake、语言模型解码，接口形状一样。</p>
 
     <h2>MDP</h2>
-    <p>马尔可夫决策过程：下一步只依赖当前状态和动作，不依赖更早的历史。五元组 <code>(S, A, P, R, γ)</code>。</p>
+    <p>马尔可夫决策过程：下一步只依赖当前状态和动作，不依赖更早的历史。五元组 \((S, A, P, R, \gamma)\)。</p>
     <ul>
-      <li><code>P(s'|s,a)</code>：转移</li>
-      <li><code>R(s,a)</code> 或 <code>r(s,a,s')</code>：奖励</li>
+      <li>\(P(s'\mid s,a)\)：转移</li>
+      <li>\(R(s,a)\) 或 \(r(s,a,s')\)：奖励</li>
     </ul>
     <p>LLM 里状态是「到目前为止的 token 序列」，动作是「下一个 token」。马尔可夫性靠把历史塞进上下文来凑。</p>
     <p>还有两个经常混的词：</p>
     <ul>
-      <li><strong>预测</strong>：策略 π 固定，估 V 或 Q。</li>
-      <li><strong>控制</strong>：同时改策略，找更好的 π。</li>
+      <li><strong>预测</strong>：策略 \(\pi\) 固定，估 \(V\) 或 \(Q\)。</li>
+      <li><strong>控制</strong>：同时改策略，找更好的 \(\pi\)。</li>
     </ul>
     <p>Q-learning、PPO、GRPO 都是控制。价值函数经常只是控制的工具。</p>
 
@@ -44,30 +44,42 @@
     <p>最常用：<strong>ε-greedy</strong>。以 1−ε 选 argmax Q，以 ε 均匀乱选。ε 随训练减小。策略梯度不靠 ε：π 本身是分布，采样就是探索；后面会加 entropy bonus 防止塌成一点。</p>
 
     <h2>回报与价值</h2>
-    <p>从时刻 t 起的折扣回报：</p>
-<pre>G_t = r_{t+1} + γ r_{t+2} + γ² r_{t+3} + …</pre>
+    <p>从时刻 \(t\) 起的折扣回报：</p>
+    <div class="eq">\[
+      G_t = r_{t+1} + \gamma r_{t+2} + \gamma^2 r_{t+3} + \cdots
+    \]</div>
     <table>
       <tr><th>函数</th><th>问的问题</th></tr>
-      <tr><td>状态价值 <code>V_π(s)</code></td><td>从 s 出发，一直跟 π，期望回报是多少</td></tr>
-      <tr><td>动作价值 <code>Q_π(s,a)</code></td><td>在 s 先做 a，之后跟 π，期望回报是多少</td></tr>
-      <tr><td>优势 <code>A_π(s,a) = Q − V</code></td><td>这个动作比「在 s 平均水平」好多少</td></tr>
+      <tr><td>状态价值 \(V_\pi(s)\)</td><td>从 \(s\) 出发，一直跟 \(\pi\)，期望回报是多少</td></tr>
+      <tr><td>动作价值 \(Q_\pi(s,a)\)</td><td>在 \(s\) 先做 \(a\)，之后跟 \(\pi\)，期望回报是多少</td></tr>
+      <tr><td>优势 \(A_\pi(s,a)=Q-V\)</td><td>这个动作比「在 \(s\) 平均水平」好多少</td></tr>
     </table>
     <div class="card">
       PPO / GRPO 优化的是优势，不是原始奖励。奖励告诉你发生了什么；优势告诉你这个动作该被加强还是削弱。组内相对分数（GRPO）只是估计 A 的一种办法。
     </div>
-    <p>关系：<code>V(s) = Σ_a π(a|s) Q(s,a)</code>。所以 A 对动作求期望是 0：好的动作正、差的负，方便当梯度权重。</p>
+    <p>关系：</p>
+    <div class="eq">\[
+      V(s)=\sum_a \pi(a\mid s)\,Q(s,a)
+    \]</div>
+    <p>所以 \(A\) 对动作求期望是 0：好的动作正、差的负，方便当梯度权重。</p>
 
     <h2>Bellman：价值的递归</h2>
-<pre>V_π(s) = E_π[ r + γ V_π(s') ]
-Q_π(s,a) = E[ r + γ V_π(s') ]</pre>
-    <p>最优策略把期望换成 max：</p>
-<pre>V*(s) = max_a Q*(s,a)
-Q*(s,a) = E[ r + γ max_{a'} Q*(s',a') ]</pre>
+    <div class="eq">\[
+      V_\pi(s)=\mathbb{E}_\pi\!\left[r+\gamma V_\pi(s')\right],
+      \qquad
+      Q_\pi(s,a)=\mathbb{E}\!\left[r+\gamma V_\pi(s')\right]
+    \]</div>
+    <p>最优策略把期望换成 \(\max\)：</p>
+    <div class="eq">\[
+      V^*(s)=\max_a Q^*(s,a),
+      \qquad
+      Q^*(s,a)=\mathbb{E}\!\left[r+\gamma \max_{a'} Q^*(s',a')\right]
+    \]</div>
     <p>状态能枚举时，直接解这个方程：</p>
     <table>
       <tr><th>算法</th><th>在干什么</th></tr>
       <tr><td>策略评估</td><td>π 固定，反复扫 Bellman，把 V_π 算准</td></tr>
-      <tr><td>策略改进</td><td>对新的 V，取 <code>π'(s) = argmax_a Q(s,a)</code></td></tr>
+      <tr><td>策略改进</td><td>对新的 \(V\)，取 \(\pi'(s)=\arg\max_a Q(s,a)\)</td></tr>
       <tr><td>策略迭代</td><td>评估 → 改进 → 再评估，直到 π 不变</td></tr>
       <tr><td>值迭代</td><td>跳过显式 π，直接对 Q 或 V 做 max 备份</td></tr>
     </table>
@@ -77,32 +89,39 @@ Q*(s,a) = E[ r + γ max_{a'} Q*(s',a') ]</pre>
     <p>不知道 P 时，用采样代替期望。</p>
     <table>
       <tr><th></th><th>更新用什么</th><th>特点</th></tr>
-      <tr><td>蒙特卡洛 (MC)</td><td>整条轨迹走完才有的真实 <code>G_t</code></td><td>无偏，方差大，必须等到 done</td></tr>
-      <tr><td>时序差分 TD(0)</td><td>一步备份 <code>r + γ V(s')</code></td><td>有偏（V 不准时），方差小，每步都能更</td></tr>
+      <tr><td>蒙特卡洛 (MC)</td><td>整条轨迹走完才有的真实 \(G_t\)</td><td>无偏，方差大，必须等到 done</td></tr>
+      <tr><td>时序差分 TD(0)</td><td>一步备份 \(r+\gamma V(s')\)</td><td>有偏（\(V\) 不准时），方差小，每步都能更</td></tr>
     </table>
-    <p>TD 目标里的 V 是自己估的，所以叫 bootstrap。PPO 里的 GAE 是 MC 和 TD 的插值：λ=1 接近 MC，λ=0 就是一步 TD。</p>
+    <p>TD 目标里的 \(V\) 是自己估的，所以叫 bootstrap。PPO 里的 GAE 是 MC 和 TD 的插值：\(\lambda=1\) 接近 MC，\(\lambda=0\) 就是一步 TD。</p>
 
     <h2>SARSA 和 Q-learning</h2>
     <p>都是表格上的 TD 控制，差在备份时「下一步动作」怎么取：</p>
-<pre>SARSA:      Q(s,a) ← Q(s,a) + α [ r + γ Q(s', a') − Q(s,a) ]   # a' ~ π，on-policy
-Q-learning: Q(s,a) ← Q(s,a) + α [ r + γ max_{a'} Q(s',a') − Q ] # max，off-policy</pre>
-    <p>SARSA 学的是「我真的会执行的 π」（含探索）；Q-learning 学的是贪心最优 Q，行为策略可以是 ε-greedy。DQN 就是 Q-learning 换成神经网络。</p>
+    <div class="eq">\[
+      \textbf{SARSA:}\quad
+      Q(s,a)\leftarrow Q(s,a)+\alpha\bigl[r+\gamma Q(s',a')-Q(s,a)\bigr]
+      \quad (a'\sim\pi)
+    \]</div>
+    <div class="eq">\[
+      \textbf{Q-learning:}\quad
+      Q(s,a)\leftarrow Q(s,a)+\alpha\bigl[r+\gamma\max_{a'}Q(s',a')-Q(s,a)\bigr]
+    \]</div>
+    <p>SARSA 学的是「我真的会执行的 \(\pi\)」（含探索）；Q-learning 学的是贪心最优 \(Q\)，行为策略可以是 \(\varepsilon\)-greedy。DQN 就是 Q-learning 换成神经网络。</p>
 
     <h2>两条家族</h2>
     <table>
       <tr><th>家族</th><th>学什么</th><th>策略怎么来</th><th>代表</th></tr>
-      <tr><td>基于价值</td><td>Q 或 V</td><td>greedy / ε-greedy</td><td>Q-learning、DQN</td></tr>
-      <tr><td>基于策略</td><td>直接参数化 π_θ</td><td>采样 π_θ</td><td>REINFORCE、PPO、GRPO</td></tr>
-      <tr><td>Actor-Critic</td><td>π 和 V 一起</td><td>采样 π，V 当 baseline</td><td>A2C、带 value head 的 PPO</td></tr>
+      <tr><td>基于价值</td><td>\(Q\) 或 \(V\)</td><td>greedy / \(\varepsilon\)-greedy</td><td>Q-learning、DQN</td></tr>
+      <tr><td>基于策略</td><td>直接参数化 \(\pi_\theta\)</td><td>采样 \(\pi_\theta\)</td><td>REINFORCE、PPO、GRPO</td></tr>
+      <tr><td>Actor-Critic</td><td>\(\pi\) 和 \(V\) 一起</td><td>采样 \(\pi\)，\(V\) 当 baseline</td><td>A2C、带 value head 的 PPO</td></tr>
     </table>
-    <p>语言模型几乎全是策略梯度：词表 ~10⁵，Q 表不现实；生成是序列决策，自然是 <code>π(token | prefix)</code>。</p>
+    <p>语言模型几乎全是策略梯度：词表 \(\sim 10^5\)，\(Q\) 表不现实；生成是序列决策，自然是 \(\pi(\mathrm{token}\mid \mathrm{prefix})\)。</p>
 
     <h2>On-policy 和 off-policy</h2>
     <ul>
       <li><strong>On-policy</strong>：用来学习的数据必须来自当前策略。PPO、GRPO 都是。采一批、更新几步、丢掉，再采。</li>
       <li><strong>Off-policy</strong>：可以用旧策略甚至别的策略的数据。DQN 的 replay、DPO 的偏好对更接近这条。</li>
     </ul>
-    <p>On-policy 所以才有 importance ratio：<code>π_new(a|s) / π_old(a|s)</code>。旧数据要拿来多更新几次，必须用这个比把分布校正回来。LLM 训练里分母 <code>π_old</code> 的 logprob 往往是 rollout 引擎算的，分子是训练引擎重算的——两边不一致，ratio 就是垃圾。这是系统页的伏笔。</p>
+    <p>On-policy 所以才有 importance ratio \(\pi_{\mathrm{new}}(a\mid s)/\pi_{\mathrm{old}}(a\mid s)\)。旧数据要拿来多更新几次，必须用这个比把分布校正回来。LLM 训练里分母 \(\pi_{\mathrm{old}}\) 的 logprob 往往是 rollout 引擎算的，分子是训练引擎重算的——两边不一致，ratio 就是垃圾。这是系统页的伏笔。</p>
     <div class="foot">下一页：<a href="deep.html">深度 RL</a></div>
   </main>
 </div>

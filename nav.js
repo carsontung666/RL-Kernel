@@ -24,4 +24,30 @@
   }
   const nav = document.getElementById("nav");
   if (nav) nav.innerHTML = html;
+
+  if (document.querySelector("link[data-katex]")) return;
+  const css = document.createElement("link");
+  css.rel = "stylesheet";
+  css.href = "https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.css";
+  css.dataset.katex = "1";
+  document.head.appendChild(css);
+  const js = document.createElement("script");
+  js.src = "https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.js";
+  js.onload = function () {
+    const auto = document.createElement("script");
+    auto.src = "https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/contrib/auto-render.min.js";
+    auto.onload = function () {
+      renderMathInElement(document.body, {
+        delimiters: [
+          { left: "$$", right: "$$", display: true },
+          { left: "\\[", right: "\\]", display: true },
+          { left: "\\(", right: "\\)", display: false },
+        ],
+        throwOnError: false,
+        ignoredTags: ["script", "noscript", "style", "textarea", "code"],
+      });
+    };
+    document.head.appendChild(auto);
+  };
+  document.head.appendChild(js);
 })();
