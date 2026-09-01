@@ -5,24 +5,19 @@
   const items = [
     ["入门", [
       ["index.html", "总览"],
+    ]],
+    ["知识", [
       ["foundations.html", "RL 基础"],
       ["deep.html", "深度 RL"],
-    ]],
-    ["LLM 对齐", [
       ["llm.html", "RLHF / DPO / GRPO"],
       ["systems.html", "系统与 RL-Kernel"],
     ]],
     ["资料", [
       ["repos.html", "仓库与课程"],
-      ["papers.html", "论文顺序"],
-    ]],
-    ["动手", [
-      ["week.html", "四周计划"],
-      ["do.html", "别碰 / 能做"],
     ]],
   ];
   let html = `<div class="brand">RL Handbook</div>
-    <div class="sub">学习笔记 · GitHub Pages</div>`;
+    <div class="sub">入门 · 知识</div>`;
   for (const [sec, links] of items) {
     html += `<div class="sec">${sec}</div>`;
     for (const [href, label] of links) {

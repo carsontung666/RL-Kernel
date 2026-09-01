@@ -44,15 +44,8 @@
     <h2>连续动作（扫一眼即可）</h2>
     <p>DDPG / TD3 / SAC 处理连续控制（机械臂、MuJoCo）。学 LLM 对齐可以先跳过，知道「还有 off-policy actor-critic」就行。以后做机器人再回来。</p>
 
-    <h2>怎么练手</h2>
-    <table>
-      <tr><th>顺序</th><th>做什么</th><th>仓库</th></tr>
-      <tr><td>1</td><td>CartPole + DQN，看 episode return 拉起来</td><td>CleanRL <code>dqn.py</code></td></tr>
-      <tr><td>2</td><td>CartPole + PPO，对照 clip 和 advantage</td><td>CleanRL <code>ppo.py</code></td></tr>
-      <tr><td>3</td><td>读 Spinning Up 的算法页，不要先读代码框架</td><td><a href="https://spinningup.openai.com/en/latest/">spinningup.openai.com</a></td></tr>
-      <tr><td>4</td><td>Atari 可选；显存和时间都贵，不是必修</td><td>CleanRL <code>ppo_atari.py</code></td></tr>
-    </table>
-    <p>Stable-Baselines3 适合「调包出结果」。要看懂算法，优先 CleanRL 的单文件，不要一上来就钻 SB3 的模块迷宫。</p>
+    <h2>参考实现</h2>
+    <p>算法细节摊在单文件里最好对照：<a href="https://github.com/vwxyzjn/cleanrl">CleanRL</a> 的 <code>dqn.py</code>、<code>ppo.py</code>。术语和算法族谱看 <a href="https://spinningup.openai.com/en/latest/">Spinning Up</a>。Stable-Baselines3 适合调包，不适合当第一份源码。</p>
 
     <h2>常见坑</h2>
     <ul>

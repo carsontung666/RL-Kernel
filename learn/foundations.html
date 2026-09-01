@@ -67,12 +67,8 @@ Q(s,a) = E[ r + γ max_{a'} Q(s',a') ]   # 最优 Q</pre>
     </ul>
     <p>On-policy 所以才有 importance ratio：<code>π_new / π_old</code>。LLM 训练里 <code>π_old</code> 的 logprob 往往是 rollout 引擎算的，<code>π_new</code> 是训练引擎重算的——两边不一致，ratio 就是垃圾。这是后面系统页的伏笔。</p>
 
-    <h2>这一页读完去哪</h2>
-    <ol>
-      <li>Sutton &amp; Barto 第 1–3 章（免费书，见<a href="repos.html">资料</a>）</li>
-      <li>蘑菇书第 1–3 章，中文更快</li>
-      <li>不要在这一层纠结证明；会算 CartPole 上的回报就够往下走</li>
-    </ol>
+    <h2>延伸阅读</h2>
+    <p>定义以 Sutton &amp; Barto 第 1–3 章为准（免费书，见<a href="repos.html">仓库与课程</a>）。中文对照看蘑菇书第 1–3 章。</p>
     <div class="foot">下一页：<a href="deep.html">深度 RL</a></div>
   </main>
 </div>
