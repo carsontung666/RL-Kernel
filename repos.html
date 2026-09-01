@@ -2,125 +2,16 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>仓库与课程 · RL Handbook</title>
+  <meta http-equiv="refresh" content="0; url=./index.html"/>
+  <title>RL Handbook</title>
   <link rel="stylesheet" href="style.css"/>
 </head>
 <body>
 <div class="wrap">
   <nav id="nav"></nav>
   <main>
-    <h1>仓库与课程</h1>
-    <p class="lead">只列值得长期打开的。星标多不代表适合入门；「为什么读」这一列才是筛选标准。</p>
-
-    <h2>教科书和中文入门</h2>
-    <table>
-      <tr><th>资源</th><th>形式</th><th>为什么读</th></tr>
-      <tr>
-        <td><a href="http://incompleteideas.net/book/RLbook2020.pdf">Sutton &amp; Barto, RL: An Introduction 2nd</a></td>
-        <td>免费 PDF</td>
-        <td>定义权威。读第 1–6、13 章就够入门策略梯度。别从第 1 页线性读到附录。</td>
-      </tr>
-      <tr>
-        <td><a href="https://github.com/datawhalechina/easy-rl">datawhalechina/easy-rl</a> · <a href="https://datawhalechina.github.io/easy-rl/">在线蘑菇书</a></td>
-        <td>中文教程 + notebook</td>
-        <td>李宏毅深度 RL 课的文字整理。中文最快建立 DQN/PPO 图像。</td>
-      </tr>
-      <tr>
-        <td><a href="https://github.com/boyu-ai/Hands-on-RL">boyu-ai/Hands-on-RL</a></td>
-        <td>代码课</td>
-        <td>《动手学强化学习》。每章有可跑代码，补蘑菇书习题。</td>
-      </tr>
-    </table>
-
-    <h2>课（英文，质量高）</h2>
-    <table>
-      <tr><th>课</th><th>为什么读</th></tr>
-      <tr>
-        <td><a href="https://spinningup.openai.com/en/latest/">OpenAI Spinning Up</a> · <a href="https://github.com/openai/spinningup">openai/spinningup</a></td>
-        <td>最短的「术语 + 算法族谱 + 关键论文清单」。Essay 讲怎么长成 RL 研究者，值得读完。</td>
-      </tr>
-      <tr>
-        <td><a href="https://www.davidsilver.uk/teaching/">David Silver UCL RL</a></td>
-        <td>经典视频。MDP、DP、MC、TD、PG 一条线讲完。配 Sutton 书。</td>
-      </tr>
-      <tr>
-        <td><a href="https://huggingface.co/learn/deep-rl-course">Hugging Face Deep RL Course</a></td>
-        <td>有练习、有证书、接 Gymnasium / SB3。动手型。</td>
-      </tr>
-      <tr>
-        <td><a href="https://rail.eecs.berkeley.edu/deeprlcourse/">Berkeley CS285</a></td>
-        <td>研究生课，覆盖 model-based、offline、robotics。第二遍再听。</td>
-      </tr>
-    </table>
-
-    <h2>代码：先读单文件，再碰框架</h2>
-    <table>
-      <tr><th>仓库</th><th>为什么读</th></tr>
-      <tr>
-        <td><a href="https://github.com/vwxyzjn/cleanrl">vwxyzjn/cleanrl</a> · <a href="https://docs.cleanrl.dev/">docs</a></td>
-        <td>每个算法一个文件。PPO/DQN/SAC 的参考实现。学算法就 clone 这个。</td>
-      </tr>
-      <tr>
-        <td><a href="https://github.com/Farama-Foundation/Gymnasium">Farama-Foundation/Gymnasium</a></td>
-        <td>现在的环境标准（OpenAI Gym 的继任）。<code>CartPole-v1</code> 从这里来。</td>
-      </tr>
-      <tr>
-        <td><a href="https://github.com/DLR-RM/stable-baselines3">DLR-RM/stable-baselines3</a></td>
-        <td>调包跑实验。不要当第一份源码读。</td>
-      </tr>
-      <tr>
-        <td><a href="https://github.com/thu-ml/tianshou">thu-ml/tianshou</a></td>
-        <td>清华的模块化 PyTorch RL。中文社区友好。</td>
-      </tr>
-      <tr>
-        <td><a href="https://github.com/dennybritz/reinforcement-learning">dennybritz/reinforcement-learning</a></td>
-        <td>Sutton 书配套 notebook，表格型方法很好。</td>
-      </tr>
-    </table>
-
-    <h2>LLM 后训练</h2>
-    <table>
-      <tr><th>仓库</th><th>为什么读</th></tr>
-      <tr>
-        <td><a href="https://github.com/huggingface/trl">huggingface/trl</a></td>
-        <td>PPO/DPO/GRPO 的入门实现。先看 trainer 里 ratio 怎么写。</td>
-      </tr>
-      <tr>
-        <td><a href="https://github.com/OpenRLHF/OpenRLHF">OpenRLHF/OpenRLHF</a></td>
-        <td>更接近生产的 RLHF 栈。</td>
-      </tr>
-      <tr>
-        <td><a href="https://github.com/volcengine/verl">volcengine/verl</a></td>
-        <td>Hybrid engine：FSDP/Megatron 训练 + vLLM rollout。看数据怎么切。</td>
-      </tr>
-      <tr>
-        <td><a href="https://github.com/THUDM/slime">THUDM/slime</a></td>
-        <td>Megatron + vLLM。vime 的训练底盘之一。</td>
-      </tr>
-      <tr>
-        <td><a href="https://github.com/vllm-project/vime">vllm-project/vime</a></td>
-        <td>框架层对齐。RL-Kernel 往它下面插算子。</td>
-      </tr>
-      <tr>
-        <td><a href="https://github.com/RL-Align/RL-Kernel">RL-Align/RL-Kernel</a></td>
-        <td>你 fork 的上游。算子层，不是框架。</td>
-      </tr>
-    </table>
-
-    <h2>博客</h2>
-    <ul>
-      <li><a href="https://lilianweng.github.io/posts/2018-02-19-rl-overview/">Lilian Weng · RL Overview</a>、<a href="https://lilianweng.github.io/posts/2018-04-08-policy-gradient/">Policy Gradient</a></li>
-      <li><a href="https://huggingface.co/blog/deep-rl-ppo">HF Blog: PPO</a>、<a href="https://huggingface.co/blog/pref-tuning">Preference Tuning</a></li>
-      <li><a href="https://www.interconnects.ai/">interconnects.ai</a> — Nathan Lambert，后训练工业界视角</li>
-    </ul>
-
-    <h2>清单型（备查）</h2>
-    <ul>
-      <li><a href="https://github.com/aikorea/awesome-rl">aikorea/awesome-rl</a></li>
-      <li><a href="https://github.com/opendilab/awesome-RLHF">opendilab/awesome-RLHF</a></li>
-    </ul>
-    <div class="foot">回 <a href="index.html">总览</a></div>
+    <h1>这一页已经并进手册正文</h1>
+    <p><a href="index.html">回总览</a></p>
   </main>
 </div>
 <script src="nav.js"></script>

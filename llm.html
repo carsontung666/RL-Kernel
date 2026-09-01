@@ -11,49 +11,86 @@
   <nav id="nav"></nav>
   <main>
     <h1>LLM 对齐：RLHF、DPO、GRPO</h1>
-    <p class="lead">语言模型的 RL：状态是 prompt+已生成 token，动作是下一个 token，奖励往往很稀疏（整段回复才打一分）。</p>
+    <p class="lead">把上一页的 PPO 接到语言模型上。状态是 prompt+已生成 token，动作是下一个 token，奖励往往整段回复才打一分。</p>
+
+    <h2>生成就是 MDP</h2>
+    <table>
+      <tr><th>RL</th><th>语言模型</th></tr>
+      <tr><td>s</td><td>到目前为止的 token 序列（含 prompt）</td></tr>
+      <tr><td>a</td><td>下一个 token，动作空间 = 词表</td></tr>
+      <tr><td>π(a|s)</td><td>softmax(logits / T)</td></tr>
+      <tr><td>转移</td><td>确定性：s' = concat(s, a)</td></tr>
+      <tr><td>奖励</td><td>多数位置是 0；结束时给一个序列分数，或逐步给格式/正确性</td></tr>
+    </table>
+    <p>序列对数概率是逐步加起来的：</p>
+<pre>log π(y | x) = Σ_t log π(y_t | x, y_&lt;t)</pre>
+    <p>训练几乎总是 <strong>teacher-forcing</strong>：用已经采样好的 y，逐步算每个 token 的 logπ，不再重新采样。采样（temperature / top-p）只发生在 rollout；算 logprob 时不要再乘一遍温度。</p>
+    <p>损失只落在 completion token 上。prompt、padding、图像占位、工具观察，都要 mask 掉。框架里这个张量叫 <code>completion_mask</code> / <code>loss_mask</code>。</p>
 
     <h2>为什么 SFT 不够</h2>
-    <p>SFT 模仿人类示范：<code>max log π(y|x)</code>。它不会说「这个答案比那个好多少」，也不会在没有示范的任务上自己探索。对齐需要一种能比较、能探索的目标，这就是 RL 或 RL 的近亲。</p>
+    <p>SFT 最大化 <code>log π(y|x)</code>，y 来自人类示范。它不会说「这个答案比那个好多少」，也不会在没有示范的题上自己探索。要对齐「更好」，需要能比较、能探索的目标：RL 或 RL 的近亲。</p>
 
-    <h2>经典三阶段（InstructGPT）</h2>
+    <h2>经典三阶段（InstructGPT / PPO-RLHF）</h2>
     <ol>
-      <li><strong>SFT</strong>：示范数据。</li>
-      <li><strong>Reward model</strong>：人类在两个回复里选更好的那个，学 <code>r_φ(x,y)</code>。</li>
-      <li><strong>PPO</strong>：策略最大化 <code>r_φ</code>，同时 KL 惩罚别离 SFT 太远。</li>
+      <li><strong>SFT</strong>：示范数据，得到 π_SFT。</li>
+      <li><strong>Reward model</strong>：人类在 (y_w, y_l) 里选更好的，学 <code>r_φ(x,y)</code>。损失是 Bradley-Terry：<code>−log σ(r_w − r_l)</code>。</li>
+      <li><strong>PPO</strong>：策略最大化 r_φ，同时 KL 惩罚别离 SFT 太远。</li>
     </ol>
-<pre>reward = r_φ(x,y) − β KL(π || π_SFT)</pre>
-    <p>论文：<a href="https://arxiv.org/abs/2203.02155">InstructGPT / Ouyang et al. 2022</a>。要配一个 value model 估优势，工程重：四个模型（policy、SFT ref、RM、value）同时在场。</p>
+<pre>r_t = 0 for t &lt; T
+r_T = r_φ(x,y) − β KL_t          # KL 可以逐步加，也可以只加在序列级
+KL_t ≈ log π_θ(y_t|s_t) − log π_ref(y_t|s_t)</pre>
+    <p>现场要四个模型：policy、SFT/ref、RM、value。Value 用 GAE 把稀疏的序列奖励变成逐步优势。工程重，所以后来有 DPO 和 GRPO。</p>
+    <p>KL 估计常用：</p>
+    <table>
+      <tr><th>名字</th><th>公式</th><th>用途</th></tr>
+      <tr><td>k1</td><td><code>logπ − logπ_ref</code></td><td>无偏但方差大，当逐步惩罚</td></tr>
+      <tr><td>k3</td><td><code>exp(logπ_ref − logπ) − (logπ_ref − logπ) − 1</code></td><td>非负，监控用更稳</td></tr>
+    </table>
+    <p>β 太大：模型不敢离 SFT，学不动奖励。β 太小：reward hacking，RM 被钻空子，语言崩。</p>
 
     <h2>DPO：跳过显式 RL</h2>
-    <p><a href="https://arxiv.org/abs/2305.18290">DPO</a> 把 RM + PPO 收成一个分类损失。输入仍是偏好对 <code>(y_w, y_l)</code>：</p>
+    <p>在「最优策略与 RM 一一对应」的假设下，RM + KL 约束 PPO 可以消掉 r_φ，变成对偏好对的分类损失：</p>
 <pre>L = −log σ( β ( log π(y_w|x)/π_ref(y_w|x)
               − log π(y_l|x)/π_ref(y_l|x) ) )</pre>
-    <p>优点：实现简单、稳定、只要 logprob。缺点：离线偏好，不会自己采样探索；分布外容易歪。</p>
-    <p>同类还有 IPO、KTO、SimPO。先把 DPO 公式抄熟，再看变体。</p>
+    <p>只需要 policy 和冻结的 ref，只要能算两条回复的 logπ。优点：实现短、稳定。缺点：离线偏好，不会自己采样探索；分布外容易歪；长度偏差（更长的 y 往往 logπ 更低或 RM 更偏）要单独处理。</p>
+    <p>IPO / KTO / SimPO 改的是「这个 sigmoid 差」的形状或要不要 ref。主干仍是：两条序列的 logπ 对比。</p>
 
-    <h2>GRPO：现在开源 LLM RL 的主流</h2>
-    <p>DeepSeekMath / DeepSeek-R1 用的 <strong>Group Relative Policy Optimization</strong>。核心变化：</p>
+    <h2>GRPO：组内相对优势</h2>
+    <p>同一个 prompt 采 G 条回复，用组内分数当 baseline，<strong>不训 value model</strong>：</p>
+<pre>A_i = (r_i − mean({r_1..r_G})) / std({r_1..r_G})
+ratio_i = exp( logπ_θ(y_i) − logπ_old(y_i) )
+L = min( ratio·A , clip(ratio, 1−ε, 1+ε)·A ) − β KL</pre>
+    <p>A_i 通常广播到这条回复的每个 completion token 上（token-level 损失、序列级优势）。数学、代码、竞赛这种可验证奖励（对 1 错 0）特别合适：一组里天然有对有错。</p>
+    <p>几个会改数值、但不改问题本身的旋钮：</p>
     <ul>
-      <li>同一个 prompt 采 <code>G</code> 条回复（group）。</li>
-      <li>优势用组内相对分数，<strong>不要 value model</strong>。</li>
-      <li>目标仍是 PPO 风格的 clipped ratio + KL。</li>
+      <li>std 过小（G 条奖励全一样）时 A≈0，这组没梯度。有人改成只减均值、不除 std（Dr.GRPO 一类）。</li>
+      <li>leave-one-out：baseline 用「除自己以外的组内均值」，自己的 r 不进 baseline，偏差更小。</li>
+      <li>损失平均：按 token 平均还是按序列平均。长回复会被 token-mean 稀释。</li>
     </ul>
-<pre>A_i = (r_i − mean(r_group)) / std(r_group)
-ratio_i = exp( logπ_θ(y_i) − logπ_old(y_i) )</pre>
-    <p>数学、代码、竞赛这种「可验证奖励」（对就 1，错就 0）特别适合 GRPO：组内天然有相对高低。</p>
     <div class="card">
-      GRPO 的内存炸弹来自 <code>G × 序列 × 词表</code> 的 logits / logprob。RL-Kernel 的 fused logp、prefix-shared attention 就是冲这个来的。
+      内存炸弹来自 <code>G × 序列长度 × 词表</code>。朴素路径要物化每条回复的完整 logits。G=64、V=15 万时，光 logprob 就能把显存打满。这是 fused logp 存在的原因。
     </div>
 
-    <h2>和 PPO 的对照</h2>
+    <h2>对照</h2>
     <table>
       <tr><th></th><th>PPO-RLHF</th><th>DPO</th><th>GRPO</th></tr>
-      <tr><td>需要 RM</td><td>要</td><td>不要（偏好对直接进损失）</td><td>可用规则/裁判，不必单独 RM</td></tr>
-      <tr><td>Value model</td><td>要</td><td>不要</td><td>不要</td></tr>
+      <tr><td>RM</td><td>要</td><td>不要（偏好对直接进损失）</td><td>可用规则/裁判，不必单独 RM</td></tr>
+      <tr><td>Value</td><td>要（GAE）</td><td>不要</td><td>不要（组内 baseline）</td></tr>
       <tr><td>在线采样</td><td>要</td><td>不要</td><td>要（每组 G 条）</td></tr>
-      <tr><td>关键张量</td><td>logπ、V、r</td><td>logπ(y_w)、logπ(y_l)</td><td>组内 logπ、old logπ、r</td></tr>
+      <tr><td>clip ratio</td><td>要</td><td>无</td><td>要</td></tr>
+      <tr><td>关键量</td><td>logπ、V、r_φ、KL</td><td>logπ(y_w)、logπ(y_l)</td><td>组内 logπ、old logπ、r</td></tr>
     </table>
+
+    <h2>一步 GRPO 在框架里怎么走</h2>
+    <p>TRL / OpenRLHF / verl / slime / vime 编排不同，算术相同：</p>
+    <ol>
+      <li><strong>Rollout</strong>：推理引擎按 π_old 采样 G 条，记下 token id 和 <code>old_logprob</code>。</li>
+      <li><strong>Reward</strong>：规则、裁判模型或 RM → 每条一个 r_i，组内算 A_i。</li>
+      <li><strong>重算 logπ</strong>：训练引擎对同一条 y 做 teacher-forcing，得到 <code>logπ_θ</code>。</li>
+      <li><strong>损失</strong>：masked 的 clip(ratio, A)，加上 KL。只在 completion 位置平均。</li>
+      <li><strong>反传 + 同步</strong>：梯度更新 policy，权重拷回推理引擎。</li>
+    </ol>
+    <p>Hybrid engine（verl 那套）：推理卡跑 vLLM，训练卡跑 FSDP/Megatron，中间搬权重和 token。两边必须看到同一份 checkpoint、同一套 tokenizer、同一侧 padding，否则第 3 步和第 1 步比的不是同一个量。</p>
 
     <h2>必须分清的两个 logprob</h2>
     <table>
@@ -61,17 +98,7 @@ ratio_i = exp( logπ_θ(y_i) − logπ_old(y_i) )</pre>
       <tr><td><code>old_logprob</code></td><td>rollout 引擎（vLLM / sglang）</td><td>importance ratio 的分母</td></tr>
       <tr><td>训练侧重算 logprob</td><td>Megatron / FSDP / DeepSpeed</td><td>ratio 的分子、梯度入口</td></tr>
     </table>
-    <p>同一条 token 序列、同一份权重，两边应对齐。对不齐就会出现假 KL、假 advantage，策略在优化噪声。下一页专门讲这个。</p>
-
-    <h2>开源框架（编排层，不是算子层）</h2>
-    <ul>
-      <li><a href="https://github.com/huggingface/trl">huggingface/trl</a> — 入门 PPO/DPO/GRPO，API 友好</li>
-      <li><a href="https://github.com/OpenRLHF/OpenRLHF">OpenRLHF/OpenRLHF</a> — 生产向 RLHF</li>
-      <li><a href="https://github.com/volcengine/verl">volcengine/verl</a> — 字节 veRL，hybrid engine</li>
-      <li><a href="https://github.com/THUDM/slime">THUDM/slime</a> — Megatron + vLLM 的训练栈</li>
-      <li><a href="https://github.com/vllm-project/vime">vllm-project/vime</a> — vLLM 生态的 RL 编排；RL-Kernel 往这里插算子</li>
-    </ul>
-    <p>这些框架管调度、数据、权重同步。RL-Kernel 不管这些，只替换 logprob / KL / packing 这些热路径。</p>
+    <p>同一条 token 序列、同一份权重，两边应对齐。对不齐就会出现假 KL、假 advantage，策略在优化噪声。packing、batch 大小、TP 切分都会改归约顺序——下一页。</p>
     <div class="foot">下一页：<a href="systems.html">系统与 RL-Kernel</a></div>
   </main>
 </div>

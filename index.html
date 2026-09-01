@@ -11,18 +11,17 @@
   <nav id="nav"></nav>
   <main>
     <h1>RL Handbook</h1>
-    <p class="lead">强化学习入门手册。只讲概念和它们怎么连在一起：从 MDP 到 PPO，再到 LLM 里的 GRPO，最后落到 RL-Kernel 这一层算子。</p>
+    <p class="lead">强化学习入门手册。概念写在这四页里：MDP 和价值、DQN/PPO、LLM 对齐、算子层一致性。不必先去翻一堆仓库。</p>
     <p class="muted">公开站：<a href="https://carsontung666.github.io/RL-Kernel/">carsontung666.github.io/RL-Kernel</a></p>
 
-    <h2>这本手册是什么</h2>
-    <p>左边目录就是全部内容。每一页讲一块知识，页脚连到下一层。不是课表，也没有论文清单。</p>
+    <h2>怎么读</h2>
+    <p>左边目录就是全部内容。每一页自洽，页脚连到下一层。</p>
     <table>
-      <tr><th>页</th><th>讲什么</th></tr>
-      <tr><td><a href="foundations.html">RL 基础</a></td><td>智能体、MDP、回报、V/Q、优势、Bellman、on/off-policy</td></tr>
-      <tr><td><a href="deep.html">深度 RL</a></td><td>DQN、策略梯度、Actor-Critic、PPO clip</td></tr>
-      <tr><td><a href="llm.html">RLHF / DPO / GRPO</a></td><td>语言模型怎么用偏好或可验证奖励改写策略</td></tr>
-      <tr><td><a href="systems.html">系统与 RL-Kernel</a></td><td>selected logprob、train–inference 漂移、算子层站在哪</td></tr>
-      <tr><td><a href="repos.html">仓库与课程</a></td><td>教科书、课、代码仓，每条标了为什么值得打开</td></tr>
+      <tr><th>页</th><th>写进去的东西</th></tr>
+      <tr><td><a href="foundations.html">RL 基础</a></td><td>MDP、V/Q/A、Bellman、MC/TD、SARSA vs Q-learning、on/off-policy</td></tr>
+      <tr><td><a href="deep.html">深度 RL</a></td><td>DQN 补丁、策略梯度、GAE、PPO clip、一次更新的数据流</td></tr>
+      <tr><td><a href="llm.html">RLHF / DPO / GRPO</a></td><td>生成当 MDP、三阶段 RLHF、DPO 消元、组内优势、两个 logprob</td></tr>
+      <tr><td><a href="systems.html">系统与 RL-Kernel</a></td><td>selected logprob、online softmax、漂移源、前向链每一段</td></tr>
     </table>
 
     <h2>知识怎么分层</h2>
@@ -58,7 +57,7 @@
     </ul>
 
     <div class="card">
-      后面几页会反复出现两个量：<strong>advantage</strong>（这个动作比平均好多少）和 <strong>importance ratio</strong>（新策略相对旧策略的概率比）。看不懂这两项时，先停在<a href="foundations.html">基础</a>和<a href="deep.html">深度 RL</a>。
+      后面会反复出现两个量：<strong>advantage</strong>（这个动作比平均好多少）和 <strong>importance ratio</strong>（新策略相对旧策略的概率比）。这两项是 PPO 和 GRPO 的公共骨架。
     </div>
 
     <div class="foot">下一页：<a href="foundations.html">RL 基础</a></div>

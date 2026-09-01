@@ -12,9 +12,6 @@
       ["llm.html", "RLHF / DPO / GRPO"],
       ["systems.html", "系统与 RL-Kernel"],
     ]],
-    ["资料", [
-      ["repos.html", "仓库与课程"],
-    ]],
   ];
   let html = `<div class="brand">RL Handbook</div>
     <div class="sub">入门 · 知识</div>`;

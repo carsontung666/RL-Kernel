@@ -11,48 +11,80 @@
   <nav id="nav"></nav>
   <main>
     <h1>深度 RL</h1>
-    <p class="lead">状态不再能做成表格。用神经网络估 Q 或 π。你真正要吃透的是 DQN 和 PPO；其余大多是变体。</p>
+    <p class="lead">状态不再能做成表格。用神经网络估 Q 或 π。真正要吃透的是 DQN 和 PPO；其余大多是变体。LLM 对齐整棵树都长在 PPO 上。</p>
 
-    <h2>DQN：把 Q-learning 接到神经网络</h2>
-    <p>朴素 Q-learning：<code>Q(s,a) ← Q + α (r + γ max Q(s',·) − Q)</code>。状态是图像时 Q 表爆炸，改成 <code>Q_θ(s,a)</code>。</p>
-    <p>两个让它能训起来的技巧：</p>
+    <h2>算法怎么分家</h2>
+    <p>先问两个问题，就能把常见名字放进格子里：</p>
+    <table>
+      <tr><th></th><th>学价值，策略派生</th><th>直接学策略</th></tr>
+      <tr><td>不用环境模型</td><td>DQN、C51、SAC（Q 侧）</td><td>REINFORCE、A2C、PPO、GRPO</td></tr>
+      <tr><td>用环境模型</td><td colspan="2">规划 / world model（学 LLM 对齐可先不管）</td></tr>
+    </table>
+    <p>再问数据从哪来：on-policy 的 PPO 必须用当前 π 采样；off-policy 的 DQN 可以吃 replay。连续动作（机械臂）常用 DDPG / TD3 / SAC：actor 输出均值，critic 估 Q。生成 token 是离散大词表，走策略梯度，不走 DDPG。</p>
+
+    <h2>DQN：Q-learning 接到网络</h2>
+    <p>表格更新是 <code>Q(s,a) ← Q + α (r + γ max Q(s',·) − Q)</code>。图像或长向量状态时 Q 表爆炸，改成 <code>Q_θ(s,a)</code>。直接对 TD 误差做回归会炸，因为相邻样本相关、目标跟着自己跑。两件补丁：</p>
     <ul>
-      <li><strong>Experience replay</strong>：把 <code>(s,a,r,s')</code> 丢进缓冲，随机抽。打破序列相关。</li>
-      <li><strong>Target network</strong>：max 那边用一套慢更新的 θ⁻，否则目标跟着自己跑。</li>
+      <li><strong>Experience replay</strong>：把 <code>(s,a,r,s')</code> 丢进缓冲，随机抽。打破序列相关，也让一份转移能用多次。</li>
+      <li><strong>Target network</strong>：max 那边用一套慢更新的 θ⁻。每隔 N 步 <code>θ⁻ ← θ</code>，否则目标每步都在动。</li>
     </ul>
-    <p>读一份实现就够：<a href="https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/dqn.py">cleanrl/dqn.py</a>（大约 200 行）。先在 <code>CartPole-v1</code> 跑绿。</p>
+<pre>y = r + γ max_{a'} Q_{θ⁻}(s', a')     # 目标，θ⁻ 不反传
+L  = (y − Q_θ(s,a))²</pre>
+    <p>Double DQN 再改一刀：argmax 用 θ，取值用 θ⁻，减轻 max 带来的过估计。Dueling 把 Q 拆成 V(s) + A(s,a)。这些是稳定技巧，不是新问题。</p>
+    <p>实现上就是：env.step → 写入 replay → 抽 batch → 算 y → 反传 Q 网络。CartPole 这种低维状态，几万步就能竖杆。</p>
 
     <h2>策略梯度</h2>
-    <p>目标：<code>J(θ) = E_{τ ~ π_θ}[G(τ)]</code>。对参数求导（REINFORCE）：</p>
-<pre>∇J ≈ Σ_t  ∇ log π_θ(a_t|s_t) · G_t</pre>
-    <p>直觉：某条轨迹回报高，就提高当时那些动作的概率；回报低就压低。</p>
-    <p><code>G_t</code> 方差极大。换成优势 <code>A_t</code>（减掉 baseline / value）是所有实用算法的第一步。A2C：一边学 π，一边学 V 当 baseline。</p>
+    <p>目标：<code>J(θ) = E_{τ ~ π_θ}[ Σ_t r_t ]</code>（或折扣版）。对参数求导，得到 REINFORCE：</p>
+<pre>∇J ≈ Σ_t  ∇ log π_θ(a_t | s_t) · G_t</pre>
+    <p>直觉：这条轨迹回报高，就提高当时那些动作的概率；回报低就压低。<code>∇ log π</code> 是「怎么改网络才能让这个 a 更常被抽到」；<code>G_t</code> 是权重。</p>
+    <p><code>G_t</code> 方差极大（整条轨迹的运气都混进来）。减掉一个不依赖 a 的 baseline 不改变期望，但能降方差。最常用 baseline 就是 V(s)，于是权重变成优势：</p>
+<pre>∇J ≈ Σ_t  ∇ log π_θ(a_t | s_t) · A_t
+A_t = Q(s_t,a_t) − V(s_t)  ≈  G_t − V(s_t)</pre>
+    <p>A2C：一个网络出 π（actor），一个出 V（critic）。critic 的损失是 <code>(G_t − V(s_t))²</code> 或 TD 误差。</p>
+
+    <h2>GAE：优势怎么估</h2>
+    <p>一步 TD 优势：<code>δ_t = r_{t+1} + γ V(s_{t+1}) − V(s_t)</code>。方差小、偏大。把未来的 δ 按 λ 折扣加起来，就是 GAE：</p>
+<pre>A_t^GAE = δ_t + (γλ) δ_{t+1} + (γλ)² δ_{t+2} + …
+λ = 0 → 一步 TD；  λ = 1 → 接近 MC</pre>
+    <p>PPO / 多数 LLM RLHF 实现都用 GAE。λ 常见 0.95。GRPO 不训 V，所以不用 GAE，改用组内相对分数当 A。</p>
 
     <h2>PPO：现在的默认策略梯度</h2>
-    <p><a href="https://arxiv.org/abs/1707.06347">PPO</a>（2017）几乎是游戏 RL 和 LLM RLHF 的共同祖先。记住三件事：</p>
+    <p>直接对 on-policy 数据做多次梯度上升，π 会一步走出采样分布，ratio 爆炸。PPO 用 clip 把每次更新钉在旧策略附近。</p>
+    <p>三件事：</p>
     <ol>
-      <li><strong>Importance ratio</strong>：<code>r_t(θ) = π_θ(a|s) / π_old(a|s)</code>。用旧策略采的数据，校正到新策略。</li>
-      <li><strong>Clip</strong>：把 ratio 限制在 <code>[1−ε, 1+ε]</code>，防止一次更新把策略拧飞。</li>
-      <li><strong>On-policy 小步</strong>：采一批 → 更新几 epoch → 丢掉，重新采。</li>
+      <li><strong>Importance ratio</strong>：<code>r_t(θ) = π_θ(a|s) / π_old(a|s) = exp(logπ_θ − logπ_old)</code>。用旧策略采的数据，校正到新策略。</li>
+      <li><strong>Clip</strong>：ratio 限制在 <code>[1−ε, 1+ε]</code>，ε 常见 0.2。</li>
+      <li><strong>On-policy 小步</strong>：采一批 → 更新 K 个 epoch → 丢掉，重新采。</li>
     </ol>
-<pre>L = min( r·A , clip(r, 1−ε, 1+ε)·A )</pre>
-    <p>正优势时 clip 防止 prob 涨太猛；负优势时防止 prob 跌太猛。</p>
+<pre>L_clip = min( r·A , clip(r, 1−ε, 1+ε)·A )</pre>
+    <p>正优势：clip 挡住 r 涨过 1+ε，概率不能一次拉太高。负优势：clip 挡住 r 跌破 1−ε，概率不能一次砸太低。取 min 是为了走更悲观的那个。</p>
+    <p>完整 PPO 损失通常还有两项（游戏设定；LLM 里 KL 往往另算）：</p>
+<pre>L = L_clip − c_v · (V_θ(s) − V_targ)² + c_e · H[π_θ](s)</pre>
+    <ul>
+      <li>value loss：让 V 跟上回报，给下一轮 GAE 用。</li>
+      <li>entropy bonus：防止 π 过早变成 one-hot，保留探索。</li>
+    </ul>
     <div class="card">
-      LLM 对齐里的 PPO 还要再加：value model、对 SFT 策略的 KL 惩罚、reward model。公式变长了，ratio 和 clip 没变。
+      LLM 对齐里的 PPO 还要加：reward model、对 SFT / ref 策略的 KL 惩罚、value model。公式变长了，ratio 和 clip 没变。GRPO 把 value 换成组内归一化，clip 还在。
     </div>
 
-    <h2>连续动作（扫一眼即可）</h2>
-    <p>DDPG / TD3 / SAC 处理连续控制（机械臂、MuJoCo）。学 LLM 对齐可以先跳过，知道「还有 off-policy actor-critic」就行。以后做机器人再回来。</p>
-
-    <h2>参考实现</h2>
-    <p>算法细节摊在单文件里最好对照：<a href="https://github.com/vwxyzjn/cleanrl">CleanRL</a> 的 <code>dqn.py</code>、<code>ppo.py</code>。术语和算法族谱看 <a href="https://spinningup.openai.com/en/latest/">Spinning Up</a>。Stable-Baselines3 适合调包，不适合当第一份源码。</p>
+    <h2>一次 PPO 更新在代码里长什么样</h2>
+    <p>和 CleanRL 单文件同一套骨架，不是另一套算法：</p>
+    <ol>
+      <li>用 π_old 在环境里跑 T 步（或 N 个并行 env × T），记下 <code>s, a, logπ_old, r, done, V</code>。</li>
+      <li>用 GAE 从后往前扫出 <code>A_t</code>，再 <code>R_t = A_t + V_t</code> 当 value 目标。</li>
+      <li>把 A 在这一批上标准化（减均值除标准差），梯度尺度才稳。</li>
+      <li>打乱，切 minibatch，对同一批数据做 K 轮：算新 logπ → ratio → clip 损失 → 反传。</li>
+      <li>丢掉这批数据。下一轮必须重新采样。</li>
+    </ol>
+    <p>Early stop：若平均 <code>|r − 1|</code> 超过约 1.5ε，说明已经走出信任域，这一批别再训了。LLM 框架里不一定有，但意思一样：on-policy 数据不能榨太狠。</p>
 
     <h2>常见坑</h2>
     <ul>
-      <li>Reward 没归一化 / advantage 没标准化：梯度尺度乱跳。</li>
-      <li>把 off-policy 数据硬塞给 PPO：ratio 爆炸。</li>
-      <li>只看 loss 下降：PPO 的 clip loss 下降不代表策略变好，看 episode return。</li>
-      <li>γ、GAE λ、clip ε 乱改：先用论文默认，环境跑绿再调。</li>
+      <li>Reward 没归一化 / A 没标准化：梯度尺度乱跳。</li>
+      <li>把 off-policy 旧数据硬塞给 PPO：ratio 爆炸，clip 挡不住系统性偏差。</li>
+      <li>只看 loss 下降：clip loss 变小不代表策略变好，看 episode return 或下游任务。</li>
+      <li>logπ 在采样时和更新时用了不同的数值路径（半精度、不同 kernel）：ratio 的分母是脏的。LLM 后训练把这个问题放大成系统问题。</li>
     </ul>
     <div class="foot">下一页：<a href="llm.html">RLHF / DPO / GRPO</a></div>
   </main>
