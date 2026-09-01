@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>能做的 RL 方向 · RL Handbook</title>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+<div class="wrap">
+  <nav id="nav"></nav>
+  <main>
+    <h1>能做的 RL 方向</h1>
+    <p class="lead">这些是这个栈上还开着的问题，不是个人课表。每条都先说问题，再说为什么必须停在算子层。</p>
+
+    <h2>1. 算子级 train–inference 一致性</h2>
+    <p>同一模型、同一序列、同一份权重，selected logprob 应不随 batch、padding、chunked prefill、prefix cache 改变。单卡链是</p>
+    <div class="eq">\[
+      \mathrm{RMSNorm}\to\mathrm{GEMM}\to\mathrm{Attn}\to\mathrm{LM\,head}\to\log\pi
+    \]</div>
+    <p>不是只修一个 fused logp。GEMM 的 split-K、attention 的 split-KV、RMSNorm 的行归约，任意一段漂了，ratio 的分子分母就不是同一个 \(\pi\)。前向对齐了还要管反向：梯度归约顺序漂了，训练照样不稳。</p>
+    <p>可做的切口：把一条 op 的归约顺序写成合同（每行独立、禁止 atomic 搅邻居），再在 batch=1/N、pack/pad、chunk on/off 上断言 \(\Delta\log\pi=0\)（或合同容差）。</p>
+
+    <h2>2. 分布式 / 跨配置对齐</h2>
+    <p>真实训练是多卡。Rollout 常是 TP=2 的 vLLM，训练常是 FSDP 或另一套 TP/CP。一致性必须跨并行配置，而不是只在同一世界大小里自比。</p>
+    <p>难点在归约拓扑：词表 TP 的 LSE 要按 shard 下标合并，不能把 NCCL sum 当数学加法；CP attention 合并的是 \((\mathrm{out},\mathrm{lse})\)，按逻辑 block 下标，不按 ring 到达顺序。downcast 发生在通信前还是后，会单独贡献一轮 bf16 误差。</p>
+    <p>可做的切口：显式的 sharding/reduction spec；确定性 AllGather / ReduceScatter；跨配置的 paired runner，对同一数据切片比 \(\log\pi\)。Pipeline parallel 是下一阶段，先把 TP/CP 锁住。</p>
+
+    <h2>3. 融合的 RL 损失</h2>
+    <p>PPO/GRPO 热路径不只是 logprob。ratio、clip、KL、组内奖励归一化、mask 平均，今天经常在 Python 里拼，来回搬 completion 长度的张量，还容易把 prompt token 算进损失。</p>
+    <p>仓库里已经有 <code>ratio_kl</code> 和 <code>grpo_loss</code>（Triton / PyTorch）。还能往同一条 primitive 上长：entropy bonus、PPO clip 的 critic 侧 Huber、token/seq/group 三种归约、leave-one-out baseline。合同仍是：mask 只落在 completion 上；归约顺序与微批切分无关。</p>
+
+    <h2>4. 多模态 RL 算子</h2>
+    <p>VLM GRPO 的新故障不在策略公式，在布局。Rollout 和训练若对图像 token、chat template、padding 侧插入不一致，后面的 selected logprob 比的就不是同一条序列。视觉前缀还是变长的，naive pad 既浪费显存又改归约形状，batch-invariant 会 magically 坏掉。</p>
+    <p>算子层该拥有的是：<code>modality_spans</code> / <code>loss_spans</code>、processor 布局对账、模态感知的 pack、以及「绝不给视觉前缀打策略损失」的 selected-logprob。框架继续管解码和 chat template。音频 / 扩散轨迹在离散 token 合同清楚之前不应先写 kernel。</p>
+
+    <h2>5. 真引擎对齐（下一阶段，不是另一套算法）</h2>
+    <p>单卡自洽、多卡自洽之后，才是真 vLLM 输出对真 Megatron 输出。两边各自正确仍可能差 \(\sim 10^{-3}\)：tokenizer、weight 转换、采样与 teacher-forcing 没分开。工具是：固定模型+prompt+seed 的交叉 logprob dump，以及「第一层漂在哪个 op」的探针。没有探针，KL 曲线不能定位。</p>
+
+    <h2>这层不该长成什么</h2>
+    <ul>
+      <li>不该变成 verl/vime 那种调度框架。</li>
+      <li>不该为每个新算法（GSPO、DAPO、Dr.GRPO）各写一套互不相通的 API；应落在 ratio-clip-aggregate 这类可配置 primitive 上。</li>
+      <li>不该在 CUDA 合同没锁时并行铺 ROCm / 国产卡「看起来能跑」的半实现；先 fallback，再 parity。</li>
+    </ul>
+    <div class="card">
+      对外能说的是「算子级 train–inference 一致性，在单卡和多卡上验证」。在真引擎交叉工具落地之前，不要说「训练推理闭环已经做完」。
+    </div>
+    <div class="foot">回 <a href="index.html">总览</a></div>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

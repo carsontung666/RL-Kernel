@@ -3,18 +3,22 @@
   let here = parts.pop() || "index.html";
   if (!here.endsWith(".html")) here = "index.html";
   const items = [
-    ["入门", [
+    ["RL 背景", [
       ["index.html", "总览"],
-    ]],
-    ["知识", [
       ["foundations.html", "RL 基础"],
       ["deep.html", "深度 RL"],
       ["llm.html", "RLHF / DPO / GRPO"],
-      ["systems.html", "系统与 RL-Kernel"],
+    ]],
+    ["本仓库架构", [
+      ["systems.html", "系统问题"],
+      ["architecture.html", "仓库怎么拆"],
+    ]],
+    ["未来方向", [
+      ["directions.html", "能做的 RL 方向"],
     ]],
   ];
   let html = `<div class="brand">RL Handbook</div>
-    <div class="sub">入门 · 知识</div>`;
+    <div class="sub">背景 · 架构 · 方向</div>`;
   for (const [sec, links] of items) {
     html += `<div class="sec">${sec}</div>`;
     for (const [href, label] of links) {

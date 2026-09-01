@@ -11,53 +11,64 @@
   <nav id="nav"></nav>
   <main>
     <h1>RL Handbook</h1>
-    <p class="lead">强化学习入门手册。概念写在这四页里：MDP 和价值、DQN/PPO、LLM 对齐、算子层一致性。不必先去翻一堆仓库。</p>
+    <p class="lead">三块：强化学习背景、这个仓库的架构、以及这个栈上还能做的 RL 方向。都写在手册里，不靠外链课表。</p>
     <p class="muted">公开站：<a href="https://carsontung666.github.io/RL-Kernel/">carsontung666.github.io/RL-Kernel</a></p>
 
-    <h2>怎么读</h2>
-    <p>左边目录就是全部内容。每一页自洽，页脚连到下一层。</p>
+    <h2>三块各讲什么</h2>
     <table>
-      <tr><th>页</th><th>写进去的东西</th></tr>
-      <tr><td><a href="foundations.html">RL 基础</a></td><td>MDP、V/Q/A、Bellman、MC/TD、SARSA vs Q-learning、on/off-policy</td></tr>
-      <tr><td><a href="deep.html">深度 RL</a></td><td>DQN 补丁、策略梯度、GAE、PPO clip、一次更新的数据流</td></tr>
-      <tr><td><a href="llm.html">RLHF / DPO / GRPO</a></td><td>生成当 MDP、三阶段 RLHF、DPO 消元、组内优势、两个 logprob</td></tr>
-      <tr><td><a href="systems.html">系统与 RL-Kernel</a></td><td>selected logprob、online softmax、漂移源、前向链每一段</td></tr>
+      <tr><th>块</th><th>页</th><th>你读完应能说出</th></tr>
+      <tr>
+        <td>RL 背景</td>
+        <td>
+          <a href="foundations.html">基础</a> ·
+          <a href="deep.html">深度 RL</a> ·
+          <a href="llm.html">RLHF / DPO / GRPO</a>
+        </td>
+        <td>MDP、\(V/Q/A\)、importance ratio、PPO clip、GRPO 组内优势</td>
+      </tr>
+      <tr>
+        <td>本仓库架构</td>
+        <td>
+          <a href="systems.html">系统问题</a> ·
+          <a href="architecture.html">仓库怎么拆</a>
+        </td>
+        <td><code>rl_engine</code> / <code>csrc</code> / executors；CUDA·Triton·ROCm·PyTorch 怎么选</td>
+      </tr>
+      <tr>
+        <td>未来方向</td>
+        <td><a href="directions.html">能做的 RL 方向</a></td>
+        <td>算子级一致性、跨配置对齐、融合损失、多模态算子各自卡在哪</td>
+      </tr>
     </table>
 
-    <h2>知识怎么分层</h2>
+    <h2>背景怎么分层</h2>
     <table>
       <tr><th></th><th>在解决什么</th><th>核心对象</th></tr>
       <tr>
         <td>表格 RL</td>
         <td>状态能枚举时学策略</td>
-        <td>Q 表、ε-greedy、Bellman 更新</td>
+        <td>Q 表、\(\varepsilon\)-greedy、Bellman 更新</td>
       </tr>
       <tr>
         <td><a href="deep.html">深度 RL</a></td>
-        <td>用网络近似 V / Q / π</td>
+        <td>用网络近似 \(V/Q/\pi\)</td>
         <td>DQN、PPO 的 ratio 与 clip</td>
       </tr>
       <tr>
         <td><a href="llm.html">LLM 对齐</a></td>
-        <td>用人类偏好或规则奖励改写生成策略</td>
+        <td>用偏好或规则奖励改写生成策略</td>
         <td>SFT、RM、DPO、GRPO 组内优势</td>
       </tr>
       <tr>
         <td><a href="systems.html">系统层</a></td>
-        <td>rollout 和训练对同一条序列给出对齐的 logprob</td>
+        <td>rollout 和训练对同一条序列给出对齐的 \(\log\pi\)</td>
         <td>fused logp、batch-invariant、确定性归约</td>
       </tr>
     </table>
 
-    <h2>三句定义</h2>
-    <ul>
-      <li><strong>强化学习</strong>：智能体在环境里试动作，用回报学策略。没有现成的「正确答案标签」。</li>
-      <li><strong>深度 RL</strong>：策略或价值函数是神经网络，状态可以是图像或 token 序列。</li>
-      <li><strong>LLM RL</strong>：环境是「提示 + 生成」，动作是 token，奖励来自人类、裁判模型或规则。</li>
-    </ul>
-
     <div class="card">
-      后面会反复出现两个量：优势 \(A_t=Q-V\)，以及 importance ratio \(r_t=\pi_\theta/\pi_{\mathrm{old}}\)。这两项是 PPO 和 GRPO 的公共骨架。
+      公共骨架：优势 \(A_t=Q-V\)，以及 importance ratio \(r_t=\pi_\theta/\pi_{\mathrm{old}}\)。
+      架构页解释这两个量在本仓库里由哪段代码算；方向页解释它们在多卡和多模态下还会怎么坏。
     </div>
 
     <div class="foot">下一页：<a href="foundations.html">RL 基础</a></div>

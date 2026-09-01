@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>仓库架构 · RL Handbook</title>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+<div class="wrap">
+  <nav id="nav"></nav>
+  <main>
+    <h1>本仓库怎么拆</h1>
+    <p class="lead">RL-Kernel 是算子库，不是 RL 调度框架。调用方写 <code>kernel_registry.get_op("linear_logp")</code>，仓库负责在 CUDA / Triton / ROCm / PyTorch 里挑第一个能跑的实现。</p>
+
+    <h2>三层里它占哪一层</h2>
+    <table>
+      <tr><th>层</th><th>谁做</th><th>本仓库有没有</th></tr>
+      <tr><td>编排</td><td>verl、slime、vime、TRL</td><td>没有。不拥有 dataset、reward I/O、macro 调度</td></tr>
+      <tr><td>引擎</td><td>vLLM / sglang；Megatron / FSDP / DeepSpeed</td><td>只有薄封装：<code>rl_engine/executors/</code> 里的 sampler、trainer、weight bridge</td></tr>
+      <tr><td>算子</td><td>本仓库</td><td>有。logprob、GEMM、attention、packing、ratio/KL、GRPO loss</td></tr>
+    </table>
+    <p>关掉 fused backend 时，registry 落到 PyTorch native，纯推理路径不受影响。</p>
+
+    <h2>目录对应什么</h2>
+    <table>
+      <tr><th>路径</th><th>角色</th></tr>
+      <tr>
+        <td><code>rl_engine/</code></td>
+        <td>Python 包。调用入口、registry、各后端 wrapper、executors、硬件探测。</td>
+      </tr>
+      <tr>
+        <td><code>rl_engine/kernels/</code></td>
+        <td>算子 HAL。<code>registry.py</code> 按设备排优先级；<code>ops/cuda</code>、<code>ops/triton</code>、<code>ops/rocm</code>、<code>ops/pytorch</code> 是四套实现。</td>
+      </tr>
+      <tr>
+        <td><code>rl_engine/platforms/</code></td>
+        <td><code>DeviceContext</code>：CUDA / HIP(ROCm) / CPU。决定走哪张 priority 表。</td>
+      </tr>
+      <tr>
+        <td><code>rl_engine/executors/</code></td>
+        <td>rollout、vLLM sampler、DeepSpeed trainer、zero-copy weight bridge、stateless reference/reward 前向。</td>
+      </tr>
+      <tr>
+        <td><code>csrc/</code></td>
+        <td>编译进 <code>rl_engine._C</code> 的 CUDA/C++。<code>ops.cpp</code> 把 kernel 绑到 Python。</td>
+      </tr>
+    </table>
+    <p>Python wrapper 不写矩阵乘法；它检查 dtype/形状、调 <code>_C</code> 或 Triton，失败就让 registry 试下一个 backend。</p>
+
+    <h2>一次 <code>get_op</code> 怎么选核</h2>
+    <ol>
+      <li><code>device_ctx</code> 看 <code>torch.cuda.is_available()</code>，再用 <code>torch.version.hip</code> 区分 NVIDIA CUDA 和 AMD ROCm。</li>
+      <li><code>KernelRegistry</code> 取出该平台、该逻辑名的优先级列表。例如 CUDA 上 <code>det_gemm</code> 是 CUDA kernel → Triton；<code>linear_logp</code> 默认 Triton → PyTorch，Hopper 上再插入 SM90 fused linear logp。</li>
+      <li>按列表构造实例。构造成功就缓存。已经失败过的 backend 本进程不再试。</li>
+      <li>全部失败才报错。CPU 只有 PyTorch native。</li>
+    </ol>
+    <p>逻辑名和文件不是一一对应。<code>"logp"</code> 吃已有 logits；<code>"linear_logp"</code> 从 hidden 和 LM head 权重算 selected logp；<code>"batch_invariant_logp"</code> / deterministic 变体锁归约顺序。调用方写逻辑名，不写 <code>.cu</code> 文件名。</p>
+    <div class="card">
+      CUDA、Triton、ROCm 不是三套 API。对外仍是 <code>op(hidden, weight, target_ids)</code>。换卡换的是 priority 表，不是训练脚本。
+    </div>
+
+    <h2><code>csrc</code> 里有什么</h2>
+    <p><code>setup.py</code> 把 <code>csrc/</code> 编成扩展 <code>rl_engine._C</code>。<code>csrc/ops.cpp</code> 声明并注册：</p>
+    <ul>
+      <li>generic / SM90 fused logp</li>
+      <li>fused linear logp（TMA + tensor-core 前向，chunked 反向）</li>
+      <li>batch-invariant logp</li>
+      <li>det GEMM、deterministic attention、prefix-shared attention</li>
+      <li>RMSNorm、RoPE、embedding / LM head 的 SM90 路径</li>
+    </ul>
+    <p>SM90 路径编译期用 <code>KERNEL_ALIGN_FORCE_SM90</code> 挡住；运行期还要看 compute capability。扩展没编出来时，CUDA wrapper 构造失败，registry 落到 Triton 或 PyTorch。</p>
+
+    <h2>前向链和这些文件的关系</h2>
+    <div class="eq">\[
+      \mathrm{embed}\to\mathrm{RMSNorm}\to\mathrm{GEMM}\to\mathrm{RoPE}\to\mathrm{Attn}\to\mathrm{MLP}
+      \to\mathrm{LM\,head/linear\_logp}
+    \]</div>
+    <table>
+      <tr><th>块</th><th>逻辑名</th><th>典型 backend</th></tr>
+      <tr><td>Embedding / LM head</td><td><code>embedding</code>、<code>lm_head</code></td><td>PyTorch native；Hopper 上 SM90</td></tr>
+      <tr><td>RMSNorm</td><td><code>rms_norm</code></td><td>PyTorch 参考；CUDA kernel 在 <code>csrc/cuda/rmsnorm.cu</code></td></tr>
+      <tr><td>矩阵乘</td><td><code>det_gemm</code></td><td>CUDA det GEMM → Triton；cuBLAS 参考不算 invariant</td></tr>
+      <tr><td>RoPE</td><td><code>rope</code></td><td>CUDA SM90 → Triton → PyTorch</td></tr>
+      <tr><td>Attention</td><td><code>attention</code>、<code>attn</code></td><td>确定性 softmax CUDA；FlashAttention 是另一条生产路径</td></tr>
+      <tr><td>Logprob</td><td><code>linear_logp</code> / <code>logp</code> / <code>batch_invariant_logp</code></td><td>见上一页合同</td></tr>
+      <tr><td>目标</td><td><code>ratio_kl</code>、<code>grpo_loss</code></td><td>Triton → PyTorch</td></tr>
+    </table>
+
+    <h2>Executors：引擎边上的薄层</h2>
+    <p>它们不替代 vLLM 或 DeepSpeed，只把本仓库的 op 接到 rollout / 训练边界：</p>
+    <table>
+      <tr><th>模块</th><th>做什么</th></tr>
+      <tr><td><code>executors/rollout.py</code></td><td><code>RolloutExecutor</code>：选 logp backend、挂采样器、接权重更新。</td></tr>
+      <tr><td><code>executors/vllm_sampler.py</code></td><td>vLLM shared-prefix 采样。GRPO 同 prompt 多回复时复用 prefix cache。</td></tr>
+      <tr><td><code>executors/deepspeed_trainer.py</code></td><td>DeepSpeed 训练 worker，损失侧走 registry 里的 logp / GRPO op。</td></tr>
+      <tr><td><code>executors/bridge.py</code></td><td>训练 → rollout 的权重桥（CUDA VMM / IPC / shared memory）。版本对不上，logprob 对齐没有意义。</td></tr>
+      <tr><td><code>executors/stateless_executor.py</code></td><td>Reference / Reward 的无 KV 前向，避免和 decode cache 比错路径。</td></tr>
+    </table>
+    <p>采样仍在引擎里；本仓库保证「记下的 <code>old_logprob</code>」和「训练侧重算的 logπ」走同一套算子合同。</p>
+    <div class="foot">下一页：<a href="directions.html">能做的 RL 方向</a></div>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>
