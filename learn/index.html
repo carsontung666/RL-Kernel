@@ -2,68 +2,10 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>总览 · RL Handbook</title>
-  <link rel="stylesheet" href="style.css"/>
+  <meta http-equiv="refresh" content="0; url=../"/>
+  <title>RL Handbook</title>
 </head>
 <body>
-<div class="wrap">
-  <nav id="nav"></nav>
-  <main>
-    <h1>RL Handbook</h1>
-    <p class="lead">强化学习入门手册。只讲概念和它们怎么连在一起：从 MDP 到 PPO，再到 LLM 里的 GRPO，最后落到 RL-Kernel 这一层算子。</p>
-    <p class="muted">公开站：<a href="https://carsontung666.github.io/RL-Kernel/learn/">carsontung666.github.io/RL-Kernel/learn</a></p>
-
-    <h2>这本手册是什么</h2>
-    <p>左边目录就是全部内容。每一页讲一块知识，页脚连到下一层。不是课表，也没有论文清单。</p>
-    <table>
-      <tr><th>页</th><th>讲什么</th></tr>
-      <tr><td><a href="foundations.html">RL 基础</a></td><td>智能体、MDP、回报、V/Q、优势、Bellman、on/off-policy</td></tr>
-      <tr><td><a href="deep.html">深度 RL</a></td><td>DQN、策略梯度、Actor-Critic、PPO clip</td></tr>
-      <tr><td><a href="llm.html">RLHF / DPO / GRPO</a></td><td>语言模型怎么用偏好或可验证奖励改写策略</td></tr>
-      <tr><td><a href="systems.html">系统与 RL-Kernel</a></td><td>selected logprob、train–inference 漂移、算子层站在哪</td></tr>
-      <tr><td><a href="repos.html">仓库与课程</a></td><td>教科书、课、代码仓，每条标了为什么值得打开</td></tr>
-    </table>
-
-    <h2>知识怎么分层</h2>
-    <table>
-      <tr><th></th><th>在解决什么</th><th>核心对象</th></tr>
-      <tr>
-        <td>表格 RL</td>
-        <td>状态能枚举时学策略</td>
-        <td>Q 表、ε-greedy、Bellman 更新</td>
-      </tr>
-      <tr>
-        <td><a href="deep.html">深度 RL</a></td>
-        <td>用网络近似 V / Q / π</td>
-        <td>DQN、PPO 的 ratio 与 clip</td>
-      </tr>
-      <tr>
-        <td><a href="llm.html">LLM 对齐</a></td>
-        <td>用人类偏好或规则奖励改写生成策略</td>
-        <td>SFT、RM、DPO、GRPO 组内优势</td>
-      </tr>
-      <tr>
-        <td><a href="systems.html">系统层</a></td>
-        <td>rollout 和训练对同一条序列给出对齐的 logprob</td>
-        <td>fused logp、batch-invariant、确定性归约</td>
-      </tr>
-    </table>
-
-    <h2>三句定义</h2>
-    <ul>
-      <li><strong>强化学习</strong>：智能体在环境里试动作，用回报学策略。没有现成的「正确答案标签」。</li>
-      <li><strong>深度 RL</strong>：策略或价值函数是神经网络，状态可以是图像或 token 序列。</li>
-      <li><strong>LLM RL</strong>：环境是「提示 + 生成」，动作是 token，奖励来自人类、裁判模型或规则。</li>
-    </ul>
-
-    <div class="card">
-      后面几页会反复出现两个量：<strong>advantage</strong>（这个动作比平均好多少）和 <strong>importance ratio</strong>（新策略相对旧策略的概率比）。看不懂这两项时，先停在<a href="foundations.html">基础</a>和<a href="deep.html">深度 RL</a>。
-    </div>
-
-    <div class="foot">下一页：<a href="foundations.html">RL 基础</a></div>
-  </main>
-</div>
-<script src="nav.js"></script>
+  <p><a href="../">RL Handbook</a></p>
 </body>
 </html>
