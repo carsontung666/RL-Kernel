@@ -13,6 +13,20 @@ std::vector<torch::Tensor> mqa_joint_attention_sink_forward(
     double scale,
     bool output_fp32);
 
+void mqa_joint_attention_sink_forward_into(
+    torch::Tensor q,
+    torch::Tensor k,
+    torch::Tensor v,
+    torch::Tensor sink,
+    torch::Tensor valid,
+    double scale,
+    bool output_fp32,
+    torch::Tensor out,
+    torch::Tensor scores,
+    torch::Tensor p_sink,
+    torch::Tensor m,
+    torch::Tensor z);
+
 std::vector<torch::Tensor> mqa_joint_attention_sink_backward(
     torch::Tensor dO,
     torch::Tensor q,
@@ -27,5 +41,6 @@ std::vector<torch::Tensor> mqa_joint_attention_sink_backward(
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("mqa_joint_attention_sink_forward", &mqa_joint_attention_sink_forward);
+  m.def("mqa_joint_attention_sink_forward_into", &mqa_joint_attention_sink_forward_into);
   m.def("mqa_joint_attention_sink_backward", &mqa_joint_attention_sink_backward);
 }

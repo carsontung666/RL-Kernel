@@ -140,12 +140,7 @@ plan = CandidatePlan(
     n_recent=cpu.plan.n_recent,
     valid=cpu.plan.valid.cuda(),
 )
-try:
-    eager, graph = eager_vs_cuda_graph_attention(q, k, v, sink, plan, cpu.state_gate)
-except P2FailClosedError as exc:
-    assert exc.status is P2Status.UNSUPPORTED_CAPABILITY, exc.status
-    print("GRAPH_STATUS=UNSUPPORTED_CAPABILITY")
-    raise SystemExit(0)
+eager, graph = eager_vs_cuda_graph_attention(q, k, v, sink, plan, cpu.state_gate)
 assert torch.equal(eager, graph)
 print("GRAPH_STATUS=BYTE_EQUAL")
 """
@@ -157,4 +152,4 @@ print("GRAPH_STATUS=BYTE_EQUAL")
         check=False,
     )
     assert proc.returncode == 0, proc.stderr + proc.stdout
-    assert "GRAPH_STATUS=" in (proc.stdout + proc.stderr)
+    assert "GRAPH_STATUS=BYTE_EQUAL" in proc.stdout

@@ -274,7 +274,124 @@ void check_inputs(const torch::Tensor& q, const torch::Tensor& k, const torch::T
               "mqa_joint_attention_sink: T exceeds CUDA grid.y limit 65535");
 }
 
+void launch_fwd_into(
+    const torch::Tensor& q_c,
+    const torch::Tensor& k_c,
+    const torch::Tensor& v_c,
+    const torch::Tensor& sink_c,
+    const torch::Tensor& valid_c,
+    double scale,
+    bool output_fp32,
+    torch::Tensor& out,
+    torch::Tensor& scores,
+    torch::Tensor& p_sink,
+    torch::Tensor& m,
+    torch::Tensor& z) {
+  const int64_t T = q_c.size(0);
+  const int64_t N = k_c.size(0);
+  auto stream = at::cuda::getCurrentCUDAStream();
+  float* scores_ptr = N == 0 ? nullptr : scores.data_ptr<float>();
+
+  if (N > 0) {
+    dim3 qk_grid(N, T);
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half, at::ScalarType::BFloat16, q_c.scalar_type(), "mqa_qk", [&] {
+          qk_kernel<scalar_t><<<qk_grid, kHq, 0, stream>>>(
+              q_c.data_ptr<scalar_t>(),
+              k_c.data_ptr<scalar_t>(),
+              valid_c.data_ptr<bool>(),
+              scores_ptr,
+              T,
+              N,
+              static_cast<float>(scale));
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
+        });
+  }
+
+  softmax_sink_kernel<<<T, kHq, 0, stream>>>(
+      scores_ptr,
+      sink_c.data_ptr<float>(),
+      N ? valid_c.data_ptr<bool>() : nullptr,
+      p_sink.data_ptr<float>(),
+      m.data_ptr<float>(),
+      z.data_ptr<float>(),
+      T,
+      N);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+  if (N == 0) {
+    out.zero_();
+  } else {
+    dim3 pv_grid(T, kHq);
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half, at::ScalarType::BFloat16, q_c.scalar_type(), "mqa_pv", [&] {
+          if (output_fp32) {
+            pv_kernel<scalar_t, float><<<pv_grid, kD, 0, stream>>>(
+                scores_ptr,
+                v_c.data_ptr<scalar_t>(),
+                out.data_ptr<float>(),
+                T,
+                N);
+          } else {
+            pv_kernel<scalar_t, scalar_t><<<pv_grid, kD, 0, stream>>>(
+                scores_ptr,
+                v_c.data_ptr<scalar_t>(),
+                out.data_ptr<scalar_t>(),
+                T,
+                N);
+          }
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
+        });
+  }
+}
+
 }  // namespace
+
+void mqa_joint_attention_sink_forward_into(
+    torch::Tensor q,
+    torch::Tensor k,
+    torch::Tensor v,
+    torch::Tensor sink,
+    torch::Tensor valid,
+    double scale,
+    bool output_fp32,
+    torch::Tensor out,
+    torch::Tensor scores,
+    torch::Tensor p_sink,
+    torch::Tensor m,
+    torch::Tensor z) {
+  check_inputs(q, k, v);
+  TORCH_CHECK(std::abs(scale - static_cast<double>(kScale)) < 1e-8,
+              "mqa_joint_attention_sink: scale must be 512^-0.5");
+  TORCH_CHECK(q.is_contiguous() && k.is_contiguous() && v.is_contiguous(),
+              "mqa_joint_attention_sink_forward_into: Q/K/V must be contiguous");
+  TORCH_CHECK(sink.is_cuda() && sink.device() == q.device() && sink.dtype() == at::kFloat,
+              "mqa_joint_attention_sink_forward_into: sink must be float CUDA");
+  TORCH_CHECK(sink.is_contiguous() && sink.sizes() == at::IntArrayRef({q.size(0), kHq}),
+              "mqa_joint_attention_sink_forward_into: sink must be contiguous [T,64]");
+  TORCH_CHECK(valid.is_cuda() && valid.device() == q.device() && valid.dtype() == at::kBool,
+              "mqa_joint_attention_sink_forward_into: valid must be bool CUDA");
+  TORCH_CHECK(valid.is_contiguous() && valid.numel() == k.size(0),
+              "mqa_joint_attention_sink_forward_into: valid length must equal N");
+  const int64_t T = q.size(0);
+  const int64_t N = k.size(0);
+  TORCH_CHECK(out.is_contiguous() && out.sizes() == at::IntArrayRef({T, kHq, kD}),
+              "mqa_joint_attention_sink_forward_into: out must be contiguous [T,64,512]");
+  TORCH_CHECK(p_sink.is_contiguous() && p_sink.sizes() == at::IntArrayRef({T, kHq}),
+              "mqa_joint_attention_sink_forward_into: p_sink must be contiguous [T,64]");
+  TORCH_CHECK(m.is_contiguous() && m.sizes() == at::IntArrayRef({T, kHq}),
+              "mqa_joint_attention_sink_forward_into: m must be contiguous [T,64]");
+  TORCH_CHECK(z.is_contiguous() && z.sizes() == at::IntArrayRef({T, kHq}),
+              "mqa_joint_attention_sink_forward_into: z must be contiguous [T,64]");
+  if (N == 0) {
+    TORCH_CHECK(scores.numel() == 0, "mqa_joint_attention_sink_forward_into: scores empty when N=0");
+  } else {
+    TORCH_CHECK(scores.is_contiguous() && scores.sizes() == at::IntArrayRef({T, kHq, N}),
+                "mqa_joint_attention_sink_forward_into: scores must be contiguous [T,64,N]");
+  }
+  const at::cuda::OptionalCUDAGuard device_guard(at::device_of(q));
+  launch_fwd_into(q, k, v, sink, valid, scale, output_fp32, out, scores, p_sink, m, z);
+}
 
 std::vector<torch::Tensor> mqa_joint_attention_sink_forward(
     torch::Tensor q,
@@ -307,66 +424,13 @@ std::vector<torch::Tensor> mqa_joint_attention_sink_forward(
   }
   TORCH_CHECK(sink_c.sizes() == at::IntArrayRef({T, kHq}), "sink must be [T,64] or [64]");
 
-  auto stream = at::cuda::getCurrentCUDAStream();
   auto scores = torch::empty({T, kHq, std::max(N, (int64_t)0)}, q_c.options().dtype(at::kFloat));
   auto p_sink = torch::empty({T, kHq}, q_c.options().dtype(at::kFloat));
   auto m = torch::empty({T, kHq}, q_c.options().dtype(at::kFloat));
   auto z = torch::empty({T, kHq}, q_c.options().dtype(at::kFloat));
   auto out = output_fp32 ? torch::empty({T, kHq, kD}, q_c.options().dtype(at::kFloat))
                          : torch::empty_like(q_c);
-
-  if (N > 0) {
-    dim3 qk_grid(N, T);
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        at::ScalarType::Half, at::ScalarType::BFloat16, q_c.scalar_type(), "mqa_qk", [&] {
-          qk_kernel<scalar_t><<<qk_grid, kHq, 0, stream>>>(
-              q_c.data_ptr<scalar_t>(),
-              k_c.data_ptr<scalar_t>(),
-              valid_c.data_ptr<bool>(),
-              scores.data_ptr<float>(),
-              T,
-              N,
-              static_cast<float>(scale));
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
-        });
-  }
-
-  softmax_sink_kernel<<<T, kHq, 0, stream>>>(
-      scores.data_ptr<float>(),
-      sink_c.data_ptr<float>(),
-      N ? valid_c.data_ptr<bool>() : nullptr,
-      p_sink.data_ptr<float>(),
-      m.data_ptr<float>(),
-      z.data_ptr<float>(),
-      T,
-      N);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-  if (N == 0) {
-    out.zero_();
-  } else {
-    dim3 pv_grid(T, kHq);
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        at::ScalarType::Half, at::ScalarType::BFloat16, q_c.scalar_type(), "mqa_pv", [&] {
-          if (output_fp32) {
-            pv_kernel<scalar_t, float><<<pv_grid, kD, 0, stream>>>(
-                scores.data_ptr<float>(),
-                v_c.data_ptr<scalar_t>(),
-                out.data_ptr<float>(),
-                T,
-                N);
-          } else {
-            pv_kernel<scalar_t, scalar_t><<<pv_grid, kD, 0, stream>>>(
-                scores.data_ptr<float>(),
-                v_c.data_ptr<scalar_t>(),
-                out.data_ptr<scalar_t>(),
-                T,
-                N);
-          }
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
-        });
-  }
-
+  launch_fwd_into(q_c, k_c, v_c, sink_c, valid_c, scale, output_fp32, out, scores, p_sink, m, z);
   auto p = N == 0 ? torch::empty({T, kHq, 0}, scores.options()) : scores;
   return {out, p, p_sink, m, z};
 }

@@ -48,3 +48,5 @@ Forbidden (fail-closed, not numeric error): two-softmax merge, Split-KV, sink-as
 python -m pytest tests/p2/test_mqa_joint_attention_oracle.py tests/p2/test_mqa_joint_attention_negative.py tests/p2/test_candidate_plan.py tests/p2/test_state_gate.py -q
 python -m pytest tests/p2/test_mqa_joint_attention_cuda.py -q
 ```
+
+CUDA-graph decode reuses a static workspace (`mqa_joint_attention_sink_forward_into`) so eager and graph produce byte-equal `O`.
