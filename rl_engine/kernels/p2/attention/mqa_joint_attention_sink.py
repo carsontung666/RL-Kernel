@@ -180,6 +180,112 @@ def _cuda_forward(
     )
 
 
+@dataclass
+class CudaFwdWorkspace:
+    """Static buffers for CUDA-graph decode. Allocate once, reuse every launch."""
+
+    out: Tensor
+    scores: Tensor
+    p_sink: Tensor
+    m: Tensor
+    z: Tensor
+    sink_th: Tensor
+    valid: Tensor
+
+
+def make_cuda_fwd_workspace(
+    q: Tensor,
+    k: Tensor,
+    sink: Tensor,
+    valid: Tensor,
+    *,
+    output_fp32: bool = True,
+) -> CudaFwdWorkspace:
+    tokens, heads, dim = q.shape
+    n_cand = int(k.shape[0])
+    sink_th = sink.to(device=q.device, dtype=torch.float32)
+    if sink_th.dim() == 1:
+        sink_th = sink_th.unsqueeze(0).expand(tokens, heads).contiguous()
+    else:
+        sink_th = sink_th.contiguous()
+    return CudaFwdWorkspace(
+        out=torch.empty(
+            tokens,
+            heads,
+            dim,
+            dtype=torch.float32 if output_fp32 else q.dtype,
+            device=q.device,
+        ),
+        scores=torch.empty(tokens, heads, n_cand, dtype=torch.float32, device=q.device),
+        p_sink=torch.empty(tokens, heads, dtype=torch.float32, device=q.device),
+        m=torch.empty(tokens, heads, dtype=torch.float32, device=q.device),
+        z=torch.empty(tokens, heads, dtype=torch.float32, device=q.device),
+        sink_th=sink_th,
+        valid=valid.to(device=q.device).contiguous(),
+    )
+
+
+def cuda_forward_into(
+    q: Tensor,
+    k: Tensor,
+    v: Tensor,
+    workspace: CudaFwdWorkspace,
+    *,
+    output_fp32: bool = True,
+) -> None:
+    """Write attention into ``workspace``. No CUDA allocations. Graph-safe."""
+
+    if _C is None or not hasattr(_C, "mqa_joint_attention_sink_forward_into"):
+        raise P2FailClosedError(
+            P2Status.UNSUPPORTED_CAPABILITY,
+            "CUDA-graph path requires mqa_joint_attention_sink_forward_into",
+        )
+    _C.mqa_joint_attention_sink_forward_into(
+        q,
+        k,
+        v,
+        workspace.sink_th,
+        workspace.valid,
+        float(ATTENTION_SCALE),
+        bool(output_fp32),
+        workspace.out,
+        workspace.scores,
+        workspace.p_sink,
+        workspace.m,
+        workspace.z,
+    )
+
+
+def _plan_from_autograd(
+    valid: Tensor,
+    kind: Tensor,
+    n_compressed: int,
+    n_recent: int,
+    layer_type: str,
+    softmax_mode: str,
+    candidate_order: str,
+    split_kv_mode: str,
+    sink_has_v: bool,
+    global_visible: bool,
+    num_splits: int,
+    atomic_reduction: bool,
+) -> CandidatePlan:
+    return CandidatePlan(
+        layer_type=layer_type,
+        n_compressed=int(n_compressed),
+        n_recent=int(n_recent),
+        valid=valid,
+        softmax_mode=softmax_mode,
+        candidate_order=candidate_order,
+        split_kv_mode=split_kv_mode,
+        sink_has_v=bool(sink_has_v),
+        global_visible=bool(global_visible),
+        kind=None if kind.numel() == 0 else kind,
+        num_splits=int(num_splits),
+        atomic_reduction=bool(atomic_reduction),
+    )
+
+
 class _MqaJointAttentionSinkFn(Function):
     @staticmethod
     def forward(
@@ -189,18 +295,35 @@ class _MqaJointAttentionSinkFn(Function):
         v: Tensor,
         sink: Tensor,
         valid: Tensor,
+        kind: Tensor,
         n_compressed: int,
         n_recent: int,
         layer_type: str,
+        softmax_mode: str,
+        candidate_order: str,
+        split_kv_mode: str,
+        sink_has_v: bool,
+        global_visible: bool,
+        num_splits: int,
+        atomic_reduction: bool,
         output_dtype_is_fp32: bool,
         use_cuda: bool,
     ) -> Tensor:
-        plan = CandidatePlan(
-            layer_type=layer_type,
-            n_compressed=int(n_compressed),
-            n_recent=int(n_recent),
-            valid=valid,
+        plan = _plan_from_autograd(
+            valid,
+            kind,
+            n_compressed,
+            n_recent,
+            layer_type,
+            softmax_mode,
+            candidate_order,
+            split_kv_mode,
+            sink_has_v,
+            global_visible,
+            num_splits,
+            atomic_reduction,
         )
+        plan.validate_for_kv(k, v)
         if use_cuda:
             result = _cuda_forward(
                 q, k, v, sink, plan, output_fp32=output_dtype_is_fp32, debug=False
@@ -263,7 +386,26 @@ class _MqaJointAttentionSinkFn(Function):
                 dq = dq.to(q.dtype)
                 dk = dk.to(k.dtype)
                 dv = dv.to(v.dtype)
-        return dq, dk, dv, dsink, None, None, None, None, None, None
+        return (
+            dq,
+            dk,
+            dv,
+            dsink,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
 
 
 class MqaJointAttentionSinkOp:
@@ -370,16 +512,30 @@ class MqaJointAttentionSinkOp:
     ) -> Tensor:
         if compare:
             require_state_gate(state_gate)
+        plan.validate_for_kv(k, v)
         resolved = self._resolve_backend(q)
+        kind = (
+            plan.kind
+            if plan.kind is not None
+            else plan.valid.new_empty(0, dtype=torch.int64)
+        )
         return _MqaJointAttentionSinkFn.apply(
             q,
             k,
             v,
             sink,
             plan.valid,
+            kind,
             plan.n_compressed,
             plan.n_recent,
             plan.layer_type.value,
+            plan.softmax_mode,
+            plan.candidate_order,
+            plan.split_kv_mode,
+            plan.sink_has_v,
+            plan.global_visible,
+            plan.num_splits,
+            plan.atomic_reduction,
             output_fp32,
             resolved == "cuda",
         )

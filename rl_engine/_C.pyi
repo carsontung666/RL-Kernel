@@ -200,6 +200,21 @@ def mqa_joint_attention_sink_forward(
     """Returns [out, P, p_sink, m, Z]."""
     ...
 
+def mqa_joint_attention_sink_forward_into(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    sink: torch.Tensor,
+    valid: torch.Tensor,
+    scale: float,
+    output_fp32: bool,
+    out: torch.Tensor,
+    scores: torch.Tensor,
+    p_sink: torch.Tensor,
+    m: torch.Tensor,
+    z: torch.Tensor,
+) -> None: ...
+
 def mqa_joint_attention_sink_backward(
     dO: torch.Tensor,
     q: torch.Tensor,
