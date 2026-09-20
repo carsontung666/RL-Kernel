@@ -409,6 +409,27 @@ std::vector<torch::Tensor> deterministic_attention_backward(
     double scale,
     torch::optional<torch::Tensor> key_padding_mask);
 
+std::vector<torch::Tensor> mqa_joint_attention_sink_forward(
+    torch::Tensor q,
+    torch::Tensor k,
+    torch::Tensor v,
+    torch::Tensor sink,
+    torch::Tensor valid,
+    double scale,
+    bool output_fp32);
+
+std::vector<torch::Tensor> mqa_joint_attention_sink_backward(
+    torch::Tensor dO,
+    torch::Tensor q,
+    torch::Tensor k,
+    torch::Tensor v,
+    torch::Tensor sink,
+    torch::Tensor valid,
+    torch::Tensor P,
+    torch::Tensor p_sink,
+    double scale,
+    bool sink_was_shared);
+
 #if defined(KERNEL_ALIGN_WITH_ROCM)
 torch::Tensor deterministic_rope_apply_rocm(
     torch::Tensor x,
@@ -707,6 +728,14 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         "deterministic_attention_backward",
         &deterministic_attention_backward,
         "Deterministic standard softmax attention backward (dQ, dK, dV)");
+    m.def(
+        "mqa_joint_attention_sink_forward",
+        &mqa_joint_attention_sink_forward,
+        "P2 T06 MQA joint attention sink forward (out, P, p_sink, m, Z)");
+    m.def(
+        "mqa_joint_attention_sink_backward",
+        &mqa_joint_attention_sink_backward,
+        "P2 T06 MQA joint attention sink backward (dQ, dK, dV, dsink)");
 #if defined(KERNEL_ALIGN_WITH_ROCM)
     m.def(
         "deterministic_rope_apply_rocm",

@@ -16,6 +16,8 @@ nav:
       - operators/README.md
       - operators/activation.md
       - operators/attention.md
+      - operators/p2-mqa-joint-attention-sink.md
+      - operators/p2-o-proj-grouped.md
       - operators/fused-logp.md
       - operators/linear-logp.md
       - operators/batch-invariant-logp.md

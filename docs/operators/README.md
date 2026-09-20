@@ -20,6 +20,8 @@ Every operator page should include:
 
 - [SiLU / SwiGLU Activation](activation.md)
 - [Standard Attention](attention.md)
+- [P2 MQA Joint Attention with Sink](p2-mqa-joint-attention-sink.md)
+- [P2 Grouped Output Projection](p2-o-proj-grouped.md)
 - [Fused LogP](fused-logp.md)
 - [Fused Linear LogP](linear-logp.md)
 - [Batch-Invariant LogP](batch-invariant-logp.md)
