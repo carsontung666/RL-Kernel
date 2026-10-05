@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 RL-Kernel Contributors
 
-"""Load T06 CUDA attention + DetGemm when pip _C cannot be built (nvcc 11 vs torch 12)."""
+"""Reuse validated native T06 kernels or refresh them through JIT."""
 
 from __future__ import annotations
 
@@ -12,6 +12,12 @@ from types import SimpleNamespace
 
 _ROOT = Path(__file__).resolve().parents[3]
 _MERGED = None
+_ATTENTION_EXPORTS = (
+    "mqa_joint_attention_sink_forward",
+    "mqa_joint_attention_sink_forward_into",
+    "mqa_joint_attention_sink_backward",
+    "mqa_joint_attention_sink_workspace_validation_version",
+)
 
 
 def resolve_cuda_home() -> str:
@@ -31,6 +37,9 @@ def _prepare_env() -> None:
 
     cuda_home = resolve_cuda_home()
     os.environ["CUDA_HOME"] = cuda_home
+    from torch.utils import cpp_extension
+
+    cpp_extension.CUDA_HOME = cuda_home
     os.environ["CC"] = os.environ.get("CC", "gcc-11")
     os.environ["CXX"] = os.environ.get("CXX", "g++-11")
     os.environ.setdefault("TORCH_CUDA_ARCH_LIST", "8.6")
@@ -74,7 +83,7 @@ def _merge(*modules):
 
 
 def ensure_native_kernels() -> str:
-    """JIT-install attention + DetGemm and patch rl_engine.kernels.ops.base._C."""
+    """Load validated T06 kernels while retaining existing native exports."""
 
     global _MERGED
     import torch
@@ -82,19 +91,29 @@ def ensure_native_kernels() -> str:
     import rl_engine.kernels.ops.base as base
     from rl_engine.kernels.p2.attention import mqa_joint_attention_sink as mqa
 
-    native_ok = (
+    native_has_gemm = (
         base._EXT_AVAILABLE
         and base._C is not None
-        and hasattr(base._C, "det_gemm_fwd_rhs_transposed")
-        and hasattr(base._C, "mqa_joint_attention_sink_forward")
+        and all(hasattr(base._C, name) for name in (
+            "det_gemm_fwd_rhs_transposed", "det_gemm_fwd", "det_gemm_db_transposed",
+        ))
+    )
+    native_ok = (
+        native_has_gemm
+        and all(hasattr(base._C, name) for name in _ATTENTION_EXPORTS)
+        and base._C.mqa_joint_attention_sink_workspace_validation_version == 1
     )
     if native_ok:
         mqa._C = base._C
         mqa._EXT_AVAILABLE = True
-        return "native"
+        return "jit" if base._C is _MERGED else "native"
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA device required")
     if _MERGED is not None:
+        base._C = _MERGED
+        base._EXT_AVAILABLE = True
+        mqa._C = _MERGED
+        mqa._EXT_AVAILABLE = True
         return "jit"
 
     _prepare_env()
@@ -105,15 +124,20 @@ def ensure_native_kernels() -> str:
             str(_ROOT / "csrc/cuda/attention/mqa_joint_attention_sink_jitbind.cpp"),
         ],
     )
-    gemm = _load(
-        "det_gemm_t06_verify",
-        [
-            str(_ROOT / "csrc/cuda/gemm/det_gemm_kernel.cu"),
-            str(_ROOT / "csrc/cuda/gemm/det_gemm_jitbind.cpp"),
-        ],
-        extra_include_paths=[str(_ROOT / "csrc/cuda/gemm")],
-    )
-    merged = _merge(attn, gemm)
+    if native_has_gemm:
+        merged = base._C
+        for name in _ATTENTION_EXPORTS:
+            setattr(merged, name, getattr(attn, name))
+    else:
+        gemm = _load(
+            "det_gemm_t06_verify",
+            [
+                str(_ROOT / "csrc/cuda/gemm/det_gemm_kernel.cu"),
+                str(_ROOT / "csrc/cuda/gemm/det_gemm_jitbind.cpp"),
+            ],
+            extra_include_paths=[str(_ROOT / "csrc/cuda/gemm")],
+        )
+        merged = _merge(attn, gemm)
     _MERGED = merged
     base._C = merged
     base._EXT_AVAILABLE = True

@@ -27,6 +27,7 @@ from rl_engine.kernels.p2.contract import (
     SCHEMA_VERSION_ATTENTION,
 )
 from rl_engine.kernels.p2.errors import P2FailClosedError, P2Status
+from rl_engine.kernels.p2.finite import capture_finite_checks, require_finite
 from rl_engine.kernels.p2.provenance import ActualProvenance
 from rl_engine.kernels.p2.state_gate import StateGateVerdict, require_state_gate
 
@@ -144,6 +145,7 @@ def _cuda_forward(
         bool(output_fp32),
     )
     o, p, p_sink, m, z = results[0], results[1], results[2], results[3], results[4]
+    require_finite((o, p, p_sink, m, z), "CUDA forward produced non-finite attention values")
     e_sink = p_sink * z
     saved = AttentionForwardTensors(
         o=o.float(),
@@ -233,7 +235,7 @@ def cuda_forward_into(
     *,
     output_fp32: bool = True,
 ) -> None:
-    """Write attention into ``workspace``. No CUDA allocations. Graph-safe."""
+    """Write attention into static buffers; graph checks use captured scalar flags."""
 
     if _C is None or not hasattr(_C, "mqa_joint_attention_sink_forward_into"):
         raise P2FailClosedError(
@@ -253,6 +255,10 @@ def cuda_forward_into(
         workspace.p_sink,
         workspace.m,
         workspace.z,
+    )
+    require_finite(
+        (workspace.out, workspace.scores, workspace.p_sink, workspace.m, workspace.z),
+        "CUDA forward produced non-finite attention values",
     )
 
 
@@ -343,6 +349,8 @@ class _MqaJointAttentionSinkFn(Function):
         )
         ctx.sink_was_shared = _sink_shared(sink)
         ctx.use_cuda = use_cuda
+        # Autograd workers do not inherit Python context variables.
+        ctx.finite_checks = capture_finite_checks()
         ctx.saved_fwd = result.saved
         return result.o
 
@@ -364,6 +372,10 @@ class _MqaJointAttentionSinkFn(Function):
                     P2Status.UNSUPPORTED_CAPABILITY,
                     "CUDA forward cannot fall back to oracle backward",
                 )
+            require_finite(
+                (grad_out,), "CUDA backward received a non-finite gradient",
+                capture_checks=ctx.finite_checks,
+            )
             grads = _C.mqa_joint_attention_sink_backward(
                 grad_out.float().contiguous(),
                 q.contiguous(),
@@ -377,6 +389,10 @@ class _MqaJointAttentionSinkFn(Function):
                 bool(ctx.sink_was_shared),
             )
             dq, dk, dv, dsink = grads[0], grads[1], grads[2], grads[3]
+            require_finite(
+                (dq, dk, dv, dsink), "CUDA backward produced non-finite gradients",
+                capture_checks=ctx.finite_checks,
+            )
         else:
             bwd = mqa_joint_attention_sink_bwd(
                 grad_out, saved, sink_was_shared=ctx.sink_was_shared
@@ -435,7 +451,8 @@ class MqaJointAttentionSinkOp:
             if not cuda_kernel_available():
                 raise P2FailClosedError(
                     P2Status.UNSUPPORTED_CAPABILITY,
-                    "auto/cuda on GPU tensors requires the T06 CUDA kernel; refusing oracle fallback",
+                    "auto/cuda on GPU tensors requires the T06 CUDA kernel; "
+                    "refusing oracle fallback",
                 )
             return "cuda"
         return "oracle"

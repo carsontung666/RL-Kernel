@@ -18,6 +18,7 @@ from rl_engine.kernels.p2.contract import (
     SCHEMA_VERSION_O_PROJ,
 )
 from rl_engine.kernels.p2.errors import P2FailClosedError, P2Status
+from rl_engine.kernels.p2.finite import CheckedCUDAGraph
 from rl_engine.kernels.p2.o_proj.o_proj_grouped import OProjGroupedOp
 from rl_engine.kernels.p2.state_gate import StateGateVerdict, require_state_gate
 
@@ -28,6 +29,7 @@ __all__ = [
     "SCHEMA_VERSION_ATTENTION",
     "SCHEMA_VERSION_O_PROJ",
     "CandidatePlan",
+    "CheckedCUDAGraph",
     "MqaJointAttentionSinkOp",
     "OProjGroupedOp",
     "P2FailClosedError",

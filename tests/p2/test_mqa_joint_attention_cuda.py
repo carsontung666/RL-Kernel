@@ -8,12 +8,178 @@ from rl_engine.kernels.p2.attention.mqa_joint_attention_sink import (
     MqaJointAttentionSinkOp,
     cuda_kernel_available,
 )
-from rl_engine.kernels.p2.attention.oracle import mqa_joint_attention_sink_bwd, mqa_joint_attention_sink_fwd
+from rl_engine.kernels.p2.attention.oracle import (
+    mqa_joint_attention_sink_bwd,
+    mqa_joint_attention_sink_fwd,
+)
 from rl_engine.kernels.p2.candidate_plan import CandidatePlan
-from rl_engine.kernels.p2.contract import CUDA_VS_ORACLE_BWD_ATOL, CUDA_VS_ORACLE_FWD_ATOL
+from rl_engine.kernels.p2.contract import (
+    ATTENTION_SCALE,
+    CUDA_VS_ORACLE_BWD_ATOL,
+    CUDA_VS_ORACLE_FWD_ATOL,
+)
 from rl_engine.kernels.p2.fixtures.catalog import named_attn_catalog
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="no GPU")
+
+_WORKSPACE_FIELDS = ("out", "scores", "p_sink", "m", "z")
+
+
+def _native_forward_case(n_candidates, output_fp32=True):
+    q = torch.randn(2, 64, 512, dtype=torch.bfloat16, device="cuda")
+    k = torch.randn(n_candidates, 512, dtype=q.dtype, device=q.device)
+    v = torch.randn_like(k)
+    sink = torch.zeros(2, 64, device=q.device)
+    valid = torch.ones(n_candidates, dtype=torch.bool, device=q.device)
+    shapes = {"out": q.shape, "scores": (2, 64, n_candidates)}
+    buffers = {
+        field: torch.full(
+            shapes.get(field, (2, 64)),
+            19,
+            dtype=q.dtype if field == "out" and not output_fp32 else torch.float32,
+            device=q.device,
+        )
+        for field in _WORKSPACE_FIELDS
+    }
+    return (q, k, v, sink, valid, float(ATTENTION_SCALE), output_fp32), buffers
+
+
+def _native_forward_into(native, inputs, buffers):
+    native.mqa_joint_attention_sink_forward_into(
+        *inputs, *(buffers[field] for field in _WORKSPACE_FIELDS)
+    )
+
+
+@pytest.fixture(scope="module")
+def validated_native():
+    from rl_engine.kernels.ops.base import _C
+
+    # Safe on old binaries: empty scores is never dereferenced. Block pointer
+    # tests unless the newly compiled native dtype guard is present.
+    inputs, buffers = _native_forward_case(0)
+    buffers["scores"] = buffers["scores"].to(torch.bfloat16)
+    with pytest.raises(RuntimeError, match="scores dtype mismatch"):
+        _native_forward_into(_C, inputs, buffers)
+    torch.cuda.synchronize()
+    return _C
+
+
+def _assert_workspace_rejected(native, inputs, buffers, field, replacement, message):
+    replacement.fill_(19)
+    invalid = dict(buffers, **{field: replacement})
+    with pytest.raises(RuntimeError, match=message):
+        _native_forward_into(native, inputs, invalid)
+    torch.cuda.synchronize()
+    # Even QK must wait until every caller-owned buffer has passed validation.
+    for buffer in (*buffers.values(), replacement):
+        assert torch.equal(buffer, torch.full_like(buffer, 19))
+
+
+@pytest.mark.parametrize("n_candidates", [0, 2])
+@pytest.mark.parametrize("field", _WORKSPACE_FIELDS)
+@pytest.mark.parametrize("device", ["cpu", "peer"])
+def test_native_forward_into_rejects_workspace_device(
+    validated_native, n_candidates, field, device
+):
+    inputs, buffers = _native_forward_case(n_candidates)
+    if device == "peer":
+        if torch.cuda.device_count() < 2:
+            pytest.skip("requires two GPUs")
+        device = f"cuda:{(inputs[0].device.index + 1) % torch.cuda.device_count()}"
+    _assert_workspace_rejected(
+        validated_native, inputs, buffers, field, buffers[field].to(device),
+        f"{field} device mismatch",
+    )
+
+
+@pytest.mark.parametrize("n_candidates", [0, 2])
+@pytest.mark.parametrize("output_fp32", [False, True])
+@pytest.mark.parametrize("field", _WORKSPACE_FIELDS)
+def test_native_forward_into_rejects_workspace_dtype(
+    validated_native, n_candidates, output_fp32, field
+):
+    inputs, buffers = _native_forward_case(n_candidates, output_fp32)
+    dtype = torch.float32 if field == "out" and not output_fp32 else torch.bfloat16
+    _assert_workspace_rejected(
+        validated_native, inputs, buffers, field, buffers[field].to(dtype),
+        f"{field} dtype mismatch",
+    )
+
+
+@pytest.mark.parametrize("n_candidates", [0, 2])
+@pytest.mark.parametrize("field", _WORKSPACE_FIELDS)
+def test_native_forward_into_rejects_workspace_shape(validated_native, n_candidates, field):
+    inputs, buffers = _native_forward_case(n_candidates)
+    _assert_workspace_rejected(
+        validated_native, inputs, buffers, field, buffers[field].reshape(-1),
+        f"{field} must be contiguous",
+    )
+
+
+@pytest.mark.parametrize("field", _WORKSPACE_FIELDS)
+def test_native_forward_into_rejects_workspace_strides(validated_native, field):
+    inputs, buffers = _native_forward_case(2)
+    shape = buffers[field].shape
+    padded = torch.empty(
+        *shape[:-1], shape[-1] * 2, dtype=buffers[field].dtype, device=inputs[0].device
+    )
+    replacement = padded[..., ::2]
+    assert replacement.shape == shape and not replacement.is_contiguous()
+    _assert_workspace_rejected(
+        validated_native, inputs, buffers, field, replacement, f"{field} must be contiguous"
+    )
+
+
+@pytest.mark.parametrize("entry", ["forward", "forward_into", "backward"])
+@pytest.mark.parametrize("field", ["k", "v"])
+def test_native_attention_rejects_kv_device_mismatch(validated_native, entry, field):
+    if torch.cuda.device_count() < 2:
+        pytest.skip("requires two GPUs")
+    inputs, buffers = _native_forward_case(2)
+    mismatched = list(inputs)
+    index = 1 if field == "k" else 2
+    peer = f"cuda:{(inputs[0].device.index + 1) % torch.cuda.device_count()}"
+    mismatched[index] = inputs[index].to(peer)
+    with pytest.raises(RuntimeError, match="Q/K/V device mismatch"):
+        if entry == "forward_into":
+            _native_forward_into(validated_native, mismatched, buffers)
+        elif entry == "forward":
+            validated_native.mqa_joint_attention_sink_forward(*mismatched)
+        else:
+            validated_native.mqa_joint_attention_sink_backward(
+                torch.zeros_like(inputs[0]), *mismatched[:5],
+                buffers["scores"], buffers["p_sink"], float(ATTENTION_SCALE), False,
+            )
+    torch.cuda.synchronize()
+
+
+@pytest.mark.parametrize("n_candidates", [0, 2])
+@pytest.mark.parametrize("output_fp32", [False, True])
+def test_native_forward_into_static_graph_matches_forward(
+    validated_native, n_candidates, output_fp32
+):
+    inputs, buffers = _native_forward_case(n_candidates, output_fp32)
+    expected = validated_native.mqa_joint_attention_sink_forward(*inputs)
+    stream = torch.cuda.Stream()
+    stream.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(stream):
+        for _ in range(2):
+            _native_forward_into(validated_native, inputs, buffers)
+    torch.cuda.current_stream().wait_stream(stream)
+    for field, reference in zip(_WORKSPACE_FIELDS, expected, strict=True):
+        assert torch.equal(buffers[field], reference)
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph, stream=stream):
+        _native_forward_into(validated_native, inputs, buffers)
+    graph.replay()
+    for field, reference in zip(_WORKSPACE_FIELDS, expected, strict=True):
+        assert torch.equal(buffers[field], reference)
+    inputs[0].add_(0.5)
+    expected = validated_native.mqa_joint_attention_sink_forward(*inputs)
+    graph.replay()
+    for field, reference in zip(_WORKSPACE_FIELDS, expected, strict=True):
+        assert torch.equal(buffers[field], reference)
+    graph.reset()
 
 
 def test_shipped_cuda_extension_exposes_t06_symbols():
@@ -35,7 +201,9 @@ def _to_cuda(case):
     return case.q.cuda(), case.k.cuda(), case.v.cuda(), case.sink.cuda(), plan
 
 
-@pytest.mark.parametrize("name", ["candidate_empty", "c0_recent_1", "csa_selected_c4", "candidate_partial"])
+@pytest.mark.parametrize(
+    "name", ["candidate_empty", "c0_recent_1", "csa_selected_c4", "candidate_partial"]
+)
 def test_cuda_matches_oracle_fp32(name):
     cpu = named_attn_catalog(device="cpu")[name]
     oracle = mqa_joint_attention_sink_fwd(cpu.q, cpu.k, cpu.v, cpu.sink, cpu.plan)

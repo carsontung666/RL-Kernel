@@ -90,6 +90,14 @@ def _validate_q(q: Tensor) -> tuple[int, int, int]:
     return tokens, heads, dim
 
 
+def _validate_scale(scale: float) -> None:
+    if scale != ATTENTION_SCALE:
+        raise P2FailClosedError(
+            P2Status.ROUND_POINT_MISMATCH,
+            f"scale must be 512^-0.5 ({ATTENTION_SCALE}), got {scale}",
+        )
+
+
 def sequential_qk(
     q: Tensor,
     k: Tensor,
@@ -124,11 +132,7 @@ def mqa_joint_attention_sink_fwd(
 ) -> AttentionForwardTensors:
     plan.validate_for_kv(k, v)
     tokens, heads, dim = _validate_q(q)
-    if abs(scale - ATTENTION_SCALE) > 0:
-        raise P2FailClosedError(
-            P2Status.ROUND_POINT_MISMATCH,
-            f"scale must be 512^-0.5 ({ATTENTION_SCALE}), got {scale}",
-        )
+    _validate_scale(scale)
     if k.device != q.device or v.device != q.device:
         raise P2FailClosedError(P2Status.SCHEMA_MISMATCH, "Q/K/V must share device")
     valid = plan.valid.to(device=q.device)
@@ -195,6 +199,7 @@ def mqa_joint_attention_sink_bwd(
     scale: float = ATTENTION_SCALE,
     sink_was_shared: bool = False,
 ) -> AttentionBackwardTensors:
+    _validate_scale(scale)
     tokens, heads, dim = saved.o.shape
     n_cand = int(saved.p.shape[2])
     d_o_f = d_o.float()

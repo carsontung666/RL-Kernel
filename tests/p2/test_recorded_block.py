@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 RL-Kernel Contributors
 
-"""Recorded full-chain T06 verification: attention -> o-proj, four-mode, long seq."""
+"""Recorded full-chain T06 verification: attention -> o-proj and long seq."""
 
 from __future__ import annotations
 
@@ -10,8 +10,12 @@ import torch
 from rl_engine.kernels.p2.attention.mqa_joint_attention_sink import MqaJointAttentionSinkOp
 from rl_engine.kernels.p2.attention.oracle import mqa_joint_attention_sink_fwd
 from rl_engine.kernels.p2.block import recorded_attention_block
-from rl_engine.kernels.p2.contract import ExecutionMode, HIDDEN_SIZE
-from rl_engine.kernels.p2.fixtures.catalog import make_attn_case, make_oproj_case, named_attn_catalog
+from rl_engine.kernels.p2.contract import HIDDEN_SIZE
+from rl_engine.kernels.p2.fixtures.catalog import (
+    make_attn_case,
+    make_oproj_case,
+    named_attn_catalog,
+)
 
 
 def test_recorded_block_c0_csa_hca_output_shape():
@@ -44,18 +48,18 @@ def test_recorded_block_c0_csa_hca_output_shape():
         assert torch.allclose(mass, torch.ones_like(mass), atol=1e-6)
 
 
-def test_four_mode_same_state_and_output_bytes():
+def test_repeated_oracle_same_state_and_output_bytes():
     case = named_attn_catalog()["csa_selected_c4"]
     op = MqaJointAttentionSinkOp(backend="oracle")
     rows = []
-    for mode in ExecutionMode:
+    for repeat in range(4):
         out = op.forward_fp32(
             case.q, case.k, case.v, case.sink, case.plan, compare=True, state_gate=case.state_gate
         )
-        rows.append((mode, out.o.clone()))
+        rows.append((repeat, out.o.clone()))
     ref = rows[0][1]
-    for mode, o in rows[1:]:
-        assert torch.equal(o, ref), f"{mode.value} drifted from training"
+    for repeat, o in rows[1:]:
+        assert torch.equal(o, ref), f"repeat {repeat} drifted"
 
 
 def test_long_sequence_attention_finite():
@@ -80,7 +84,14 @@ def test_layer_table_c0_c4_c128_independent_recorded_rows():
     op = MqaJointAttentionSinkOp(backend="oracle")
     outs = []
     for layer, n_c, n_r in (("C0", 0, 8), ("C4", 8, 8), ("C128", 2, 8)):
-        case = make_attn_case(f"table-{layer}", layer_type=layer, tokens=1, n_compressed=n_c, n_recent=n_r, seed=3)
+        case = make_attn_case(
+            f"table-{layer}",
+            layer_type=layer,
+            tokens=1,
+            n_compressed=n_c,
+            n_recent=n_r,
+            seed=3,
+        )
         out = op.forward_fp32(
             case.q, case.k, case.v, case.sink, case.plan, compare=True, state_gate=case.state_gate
         )

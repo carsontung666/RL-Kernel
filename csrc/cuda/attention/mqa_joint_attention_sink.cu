@@ -261,6 +261,8 @@ __global__ void reduce_dsink_shared_kernel(const float* dsink_th, float* dsink_h
 
 void check_inputs(const torch::Tensor& q, const torch::Tensor& k, const torch::Tensor& v) {
   TORCH_CHECK(q.is_cuda() && k.is_cuda() && v.is_cuda(), "mqa_joint_attention_sink: CUDA tensors required");
+  TORCH_CHECK(k.device() == q.device() && v.device() == q.device(),
+              "mqa_joint_attention_sink: Q/K/V device mismatch");
   TORCH_CHECK(q.dim() == 3 && q.size(1) == kHq && q.size(2) == kD,
               "mqa_joint_attention_sink: Q must be [T, 64, 512]");
   TORCH_CHECK(k.dim() == 2 && v.dim() == 2 && k.size(1) == kD && v.size(1) == kD && k.size(0) == v.size(0),
@@ -375,20 +377,36 @@ void mqa_joint_attention_sink_forward_into(
               "mqa_joint_attention_sink_forward_into: valid length must equal N");
   const int64_t T = q.size(0);
   const int64_t N = k.size(0);
+  TORCH_CHECK(out.is_cuda() && out.device() == q.device(),
+              "mqa_joint_attention_sink_forward_into: out device mismatch");
+  TORCH_CHECK(out.scalar_type() == (output_fp32 ? at::kFloat : q.scalar_type()),
+              "mqa_joint_attention_sink_forward_into: out dtype mismatch");
   TORCH_CHECK(out.is_contiguous() && out.sizes() == at::IntArrayRef({T, kHq, kD}),
               "mqa_joint_attention_sink_forward_into: out must be contiguous [T,64,512]");
+  TORCH_CHECK(scores.is_cuda() && scores.device() == q.device(),
+              "mqa_joint_attention_sink_forward_into: scores device mismatch");
+  TORCH_CHECK(scores.scalar_type() == at::kFloat,
+              "mqa_joint_attention_sink_forward_into: scores dtype mismatch");
+  TORCH_CHECK(scores.is_contiguous() && scores.sizes() == at::IntArrayRef({T, kHq, N}),
+              "mqa_joint_attention_sink_forward_into: scores must be contiguous [T,64,N]");
+  TORCH_CHECK(p_sink.is_cuda() && p_sink.device() == q.device(),
+              "mqa_joint_attention_sink_forward_into: p_sink device mismatch");
+  TORCH_CHECK(p_sink.scalar_type() == at::kFloat,
+              "mqa_joint_attention_sink_forward_into: p_sink dtype mismatch");
   TORCH_CHECK(p_sink.is_contiguous() && p_sink.sizes() == at::IntArrayRef({T, kHq}),
               "mqa_joint_attention_sink_forward_into: p_sink must be contiguous [T,64]");
+  TORCH_CHECK(m.is_cuda() && m.device() == q.device(),
+              "mqa_joint_attention_sink_forward_into: m device mismatch");
+  TORCH_CHECK(m.scalar_type() == at::kFloat,
+              "mqa_joint_attention_sink_forward_into: m dtype mismatch");
   TORCH_CHECK(m.is_contiguous() && m.sizes() == at::IntArrayRef({T, kHq}),
               "mqa_joint_attention_sink_forward_into: m must be contiguous [T,64]");
+  TORCH_CHECK(z.is_cuda() && z.device() == q.device(),
+              "mqa_joint_attention_sink_forward_into: z device mismatch");
+  TORCH_CHECK(z.scalar_type() == at::kFloat,
+              "mqa_joint_attention_sink_forward_into: z dtype mismatch");
   TORCH_CHECK(z.is_contiguous() && z.sizes() == at::IntArrayRef({T, kHq}),
               "mqa_joint_attention_sink_forward_into: z must be contiguous [T,64]");
-  if (N == 0) {
-    TORCH_CHECK(scores.numel() == 0, "mqa_joint_attention_sink_forward_into: scores empty when N=0");
-  } else {
-    TORCH_CHECK(scores.is_contiguous() && scores.sizes() == at::IntArrayRef({T, kHq, N}),
-                "mqa_joint_attention_sink_forward_into: scores must be contiguous [T,64,N]");
-  }
   const at::cuda::OptionalCUDAGuard device_guard(at::device_of(q));
   launch_fwd_into(q, k, v, sink, valid, scale, output_fp32, out, scores, p_sink, m, z);
 }

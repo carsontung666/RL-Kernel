@@ -4,8 +4,10 @@
 """T06 local verification runner.
 
 CPU oracle + negatives + recorded block always run.
-CUDA: uses rl_engine._C if present; otherwise JIT-compiles the T06 kernel
-with g++-11 / nvcc (this machine's working toolchain) and injects it.
+CUDA: reuses validated native kernels or JIT-refreshes T06 attention, retaining
+native DetGemm when available; otherwise JIT-compiles both.
+The CUDA phase acquires /tmp/rl-kernel-t06-gpu.lock internally; do not wrap
+this runner in another flock for that same path.
 
 This is recorded-operator verification, not a live DSV4 / Qwen3 training run.
 """
@@ -13,6 +15,7 @@ This is recorded-operator verification, not a live DSV4 / Qwen3 training run.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import subprocess
@@ -27,64 +30,8 @@ if str(ROOT) not in sys.path:
 def _run_pytest(args: list[str]) -> int:
     cmd = [sys.executable, "-m", "pytest", "-q", "--tb=line", *args]
     print("+", " ".join(cmd), flush=True)
-    return subprocess.call(cmd, cwd=ROOT)
-
-
-def _resolve_cuda_home() -> str:
-    candidates = [
-        os.environ.get("T06_CUDA_HOME"),
-        os.environ.get("CUDA_HOME"),
-        "/usr/local/cuda-11.8",
-        "/usr/local/cuda",
-    ]
-    for home in candidates:
-        if home and (Path(home) / "bin" / "nvcc").is_file():
-            return home
-    raise RuntimeError("no CUDA toolkit with nvcc found (tried CUDA_HOME and /usr/local/cuda-11.8)")
-
-
-def _jit_cuda_module():
-    cuda_home = _resolve_cuda_home()
-    os.environ["CUDA_HOME"] = cuda_home
-    os.environ["CC"] = os.environ.get("CC", "gcc-11")
-    os.environ["CXX"] = os.environ.get("CXX", "g++-11")
-    os.environ.setdefault("TORCH_CUDA_ARCH_LIST", "8.6")
-    os.environ["PATH"] = str(Path(cuda_home) / "bin") + os.pathsep + os.environ.get("PATH", "")
-    torch_lib = Path(sys.prefix)
-    # site-packages torch lib
-    import torch
-
-    os.environ["LD_LIBRARY_PATH"] = (
-        str(Path(torch.__file__).parent / "lib")
-        + os.pathsep
-        + str(Path(cuda_home) / "lib64")
-        + os.pathsep
-        + os.environ.get("LD_LIBRARY_PATH", "")
-    )
-    from torch.utils.cpp_extension import load
-
-    return load(
-        name="mqa_t06_verify",
-        sources=[
-            str(ROOT / "csrc/cuda/attention/mqa_joint_attention_sink.cu"),
-            str(ROOT / "csrc/cuda/attention/mqa_joint_attention_sink_jitbind.cpp"),
-        ],
-        extra_cuda_cflags=[
-            "-O3",
-            "--expt-relaxed-constexpr",
-            "--expt-extended-lambda",
-            "-ccbin=g++-11",
-        ],
-        extra_cflags=["-std=c++17"],
-        verbose=True,
-    )
-
-
-def _inject_cuda(mod) -> None:
-    import rl_engine.kernels.p2.attention.mqa_joint_attention_sink as mqa
-
-    mqa._C = mod
-    mqa._EXT_AVAILABLE = True
+    env = dict(os.environ, CUDA_VISIBLE_DEVICES="")
+    return subprocess.call(cmd, cwd=ROOT, env=env)
 
 
 def main() -> int:
@@ -118,33 +65,33 @@ def main() -> int:
 
     import torch
 
-    from rl_engine.kernels.p2.attention.mqa_joint_attention_sink import cuda_kernel_available
+    from rl_engine.kernels.p2.cuda_runtime import ensure_t06_cuda_kernel
 
-    cuda_source = "unavailable"
     if not torch.cuda.is_available():
         report["verdicts"]["cuda"] = "SKIP"
         report["verdicts"]["cuda_reason"] = "no GPU"
     else:
         try:
-            if cuda_kernel_available():
-                cuda_source = "rl_engine._C"
-            else:
-                print("[t06] _C missing mqa symbols; JIT-compiling CUDA reference", flush=True)
-                mod = _jit_cuda_module()
-                _inject_cuda(mod)
-                cuda_source = "jit_gcc11"
-            import pytest
-            import rl_engine.kernels.p2.attention.mqa_joint_attention_sink as mqa
+            with open("/tmp/rl-kernel-t06-gpu.lock", "a") as gpu_lock:
+                fcntl.flock(gpu_lock, fcntl.LOCK_EX)
+                report["verdicts"]["cuda_source"] = ensure_t06_cuda_kernel()
+                import pytest
 
-            assert mqa.cuda_kernel_available()
-            # Must run in-process so the JIT injection is visible to tests.
-            cuda_rc = pytest.main(["-q", "--tb=line", str(ROOT / "tests/p2/test_mqa_joint_attention_cuda.py")])
+                # Keep JIT injection visible; cover attention, o-proj and the
+                # actual four-mode chain, including captured backward.
+                cuda_rc = pytest.main([
+                    "-q", "--tb=line",
+                    str(ROOT / "tests/p2/test_mqa_joint_attention_cuda.py"),
+                    str(ROOT / "tests/p2/test_mqa_joint_attention_nonfinite.py"),
+                    str(ROOT / "tests/p2/test_o_proj_det_gemm.py"),
+                    str(ROOT / "tests/p2/test_four_mode.py"),
+                    str(ROOT / "tests/p2/test_mqa_joint_attention_negative.py"),
+                ])
             report["verdicts"]["cuda_pytest"] = "PASS" if cuda_rc == 0 else "FAIL"
-            report["verdicts"]["cuda_source"] = cuda_source
+            report["verdicts"]["cuda"] = "PASS" if cuda_rc == 0 else "FAIL"
             if cuda_rc != 0:
                 _write(report, args.json_out)
                 return cuda_rc
-            report["verdicts"]["cuda"] = "PASS"
         except Exception as exc:
             report["verdicts"]["cuda"] = "FAIL"
             report["verdicts"]["cuda_error"] = f"{type(exc).__name__}: {exc}"

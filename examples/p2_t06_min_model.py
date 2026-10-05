@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 RL-Kernel Contributors
+# Repository imports follow the sys.path bootstrap for direct script execution.
+# ruff: noqa: E402
 """Run a DSV4-shaped mini model through T06 attention + grouped o-proj on GPU.
 
 Layer table mixes C0/C4/C128. Compressed rows are synthetic recorded stand-ins
@@ -37,9 +39,12 @@ from rl_engine.kernels.p2.contract import (
     RECENT_WINDOW,
 )
 from rl_engine.kernels.p2.cuda_runtime import ensure_t06_cuda_kernel
-from rl_engine.kernels.p2.four_mode import eager_vs_cuda_graph_attention
+from rl_engine.kernels.p2.four_mode import verify_recorded_four_modes
 from rl_engine.kernels.p2.o_proj.o_proj_grouped import OProjGroupedOp
-from rl_engine.kernels.p2.o_proj.rope_consumer import apply_gptj_interleaved_partial, fixture_cos_sin
+from rl_engine.kernels.p2.o_proj.rope_consumer import (
+    apply_gptj_interleaved_partial,
+    fixture_cos_sin,
+)
 from rl_engine.kernels.p2.state_gate import synthetic_pass_verdict
 
 
@@ -92,14 +97,18 @@ class P2Layer(nn.Module):
         self.w_q = nn.Linear(HIDDEN_SIZE, N_Q_HEADS * HEAD_DIM, bias=False)
         self.w_k = nn.Linear(HIDDEN_SIZE, HEAD_DIM, bias=False)
         self.w_v = nn.Linear(HIDDEN_SIZE, HEAD_DIM, bias=False)
-        self.w_a = nn.Parameter(0.02 * torch.randn(N_O_PROJ_GROUPS, O_LORA_RANK, GROUP_FLAT_DIM, dtype=torch.bfloat16))
-        self.w_b = nn.Parameter(0.02 * torch.randn(HIDDEN_SIZE, N_O_PROJ_GROUPS * O_LORA_RANK, dtype=torch.bfloat16))
+        self.w_a = nn.Parameter(0.02 * torch.randn(
+            N_O_PROJ_GROUPS, O_LORA_RANK, GROUP_FLAT_DIM, dtype=torch.bfloat16
+        ))
+        self.w_b = nn.Parameter(0.02 * torch.randn(
+            HIDDEN_SIZE, N_O_PROJ_GROUPS * O_LORA_RANK, dtype=torch.bfloat16
+        ))
         self.sink = nn.Parameter(torch.zeros(N_Q_HEADS))
         self.attn = MqaJointAttentionSinkOp(backend="cuda")
         self.o_proj = OProjGroupedOp(backend="det_gemm")
         self.state_gate = synthetic_pass_verdict(tag=f"min-model-{layer_type}")
 
-    def forward(self, hidden: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
+    def recorded_inputs(self, hidden: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor):
         normed = F.rms_norm(hidden, (HIDDEN_SIZE,), self.rms_w, 1e-6)
         tokens = hidden.shape[0]
         q = self.w_q(normed).view(tokens, N_Q_HEADS, HEAD_DIM)
@@ -107,6 +116,10 @@ class P2Layer(nn.Module):
         k = self.w_k(normed)
         v = self.w_v(normed)
         k_cat, v_cat, plan = build_candidates(self.layer_type, k, v)
+        return q, k_cat, v_cat, plan
+
+    def forward(self, hidden: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
+        q, k_cat, v_cat, plan = self.recorded_inputs(hidden, cos, sin)
         o = self.attn.apply_autograd(
             q,
             k_cat,
@@ -141,7 +154,29 @@ def main() -> int:
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--json-out", type=Path, default=Path("/tmp/p2_t06_min_model.json"))
     args = parser.parse_args()
+    if args.tokens < 2 or args.steps < 2:
+        parser.error("verification requires --tokens >= 2 and --steps >= 2")
+    if torch.device(args.device).type != "cuda":
+        parser.error("the mini-model requires CUDA attention and DetGemm")
 
+    args.json_out.parent.mkdir(parents=True, exist_ok=True)
+    pending = {
+        "task_id": "T06",
+        "experiment": "p2_t06_min_model",
+        "status": "RUNNING",
+        "four_mode_equal": False,
+        "cuda_graph_status": "NOT_RUN",
+    }
+    args.json_out.write_text(json.dumps(pending, indent=2) + "\n")
+    try:
+        return _run(args)
+    except Exception as exc:
+        pending.update(status="FAIL", error=f"{type(exc).__name__}: {exc}")
+        args.json_out.write_text(json.dumps(pending, indent=2) + "\n")
+        raise
+
+
+def _run(args) -> int:
     torch.backends.cuda.matmul.allow_tf32 = False
     device = torch.device(args.device)
     cuda_source = ensure_t06_cuda_kernel() if device.type == "cuda" else "cpu"
@@ -176,33 +211,36 @@ def main() -> int:
         losses.append(float(loss.detach()))
         print(f"[p2-t06-model] step={step} loss={losses[-1]:.6f}", flush=True)
 
+    del opt
+    model.zero_grad(set_to_none=True)
     model.eval()
-    with torch.no_grad():
-        training_like = model(hidden, cos, sin)
-        prefill = model(hidden, cos, sin)
-        eager_decode = model(hidden, cos, sin)
-    four_mode_eager_equal = torch.equal(training_like, prefill) and torch.equal(prefill, eager_decode)
-
-    from rl_engine.kernels.p2.fixtures.catalog import make_attn_case
-
-    attn_case = make_attn_case(
-        "graph", layer_type="C4", tokens=2, n_compressed=4, n_recent=8, seed=0, device=str(device)
-    )
-    graph_status = "SKIP"
-    if device.type == "cuda":
+    mode_reports = []
+    x = hidden
+    for index, layer in enumerate(model.layers):
+        with torch.no_grad():
+            q, k, v, plan = layer.recorded_inputs(x, cos, sin)
         try:
-            eager_o, graph_o = eager_vs_cuda_graph_attention(
-                attn_case.q,
-                attn_case.k,
-                attn_case.v,
-                attn_case.sink,
-                attn_case.plan,
-                attn_case.state_gate,
+            mode_report = verify_recorded_four_modes(
+                q, k, v, layer.sink, plan, layer.w_a, layer.w_b,
+                cos, sin, layer.state_gate,
             )
-            graph_status = "PASS" if torch.equal(eager_o, graph_o) else "BYTE_MISMATCH"
         except Exception as exc:
-            graph_status = f"UNSUPPORTED_CAPABILITY:{type(exc).__name__}"
-    four_mode_equal = bool(four_mode_eager_equal)
+            mode_reports.append({
+                "layer": index, "status": "FAIL", "four_mode_equal": False,
+                "error": f"{type(exc).__name__}: {exc}",
+            })
+            # A failed capture can invalidate the CUDA context; persist the
+            # failure without trying another CUDA operation.
+            break
+        mode_report["layer"] = index
+        mode_reports.append(mode_report)
+        print(f"[p2-t06-model] four_mode layer={index} status={mode_report['status']}", flush=True)
+        if index + 1 < len(model.layers):
+            with torch.no_grad():
+                x = layer(x, cos, sin)
+    four_mode_equal = len(mode_reports) == len(model.layers) and all(
+        r["four_mode_equal"] for r in mode_reports
+    )
 
     elapsed = time.perf_counter() - t0
     n_params = sum(p.numel() for p in model.parameters())
@@ -217,17 +255,24 @@ def main() -> int:
         "n_params": n_params,
         "losses": losses,
         "loss_dropped": bool(losses[-1] < losses[0]),
-        "four_mode_eager_equal": bool(four_mode_eager_equal),
-        "cuda_graph_status": graph_status,
+        "status": "PASS" if four_mode_equal and losses[-1] < losses[0] else "FAIL",
+        "cuda_graph_status": "PASS" if four_mode_equal else "FAIL",
         "four_mode_equal": four_mode_equal,
+        "four_mode_scope": (
+            "per-layer recorded attention + inverse RoPE + o-proj, including graph backward"
+        ),
+        "four_mode_layers": mode_reports,
         "elapsed_sec": elapsed,
         "output_shape": [tokens, HIDDEN_SIZE],
-        "note": "synthetic recorded C4/C128 rows; T04 compressor not live",
+        "note": (
+            "synthetic C4/C128 rows; frozen candidate state; "
+            "no live cache/compressor or whole-model graph"
+        ),
     }
     args.json_out.write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2), flush=True)
-    if not four_mode_equal:
-        raise SystemExit(2)
+    if not four_mode_equal or not report["loss_dropped"]:
+        return 2
     return 0
 
 
